@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NO_FILTERS } from "../lib/filter";
 import { loadMembership, loadProductsPage } from "../lib/shopify-data";
-import type { Filters, Group, Membership, ProductRow, ProfileSummary } from "../lib/types";
+import type { Filters, Membership, ProductRow, ProfileSummary } from "../lib/types";
 import type { AppState } from "./state";
 
 export type ProductsLoad = {
@@ -21,14 +21,14 @@ export type ProductsLoad = {
   reload: () => void;
 };
 
-export function useProductsLoad(app: Pick<AppState, "groups" | "profiles" | "hiddenCatalogIds"> | null): ProductsLoad {
+export function useProductsLoad(app: Pick<AppState, "profiles" | "hiddenCatalogIds"> | null): ProductsLoad {
   const [status, setStatus] = useState<ProductsLoad["status"]>("idle");
   const [rows, setRows] = useState<ProductRow[]>([]);
   const [membership, setMembership] = useState<Membership>({});
   const [loaded, setLoaded] = useState(0);
   const [error, setError] = useState("");
   const running = useRef(false);
-  const latest = useRef<{ groups: Group[]; profiles: ProfileSummary[]; hiddenCatalogIds: string[] } | null>(null);
+  const latest = useRef<{ profiles: ProfileSummary[]; hiddenCatalogIds: string[] } | null>(null);
   latest.current = app;
 
   const run = useCallback(async () => {
@@ -47,8 +47,8 @@ export function useProductsLoad(app: Pick<AppState, "groups" | "profiles" | "hid
         if (!res.hasNext) break;
         after = res.cursor;
       }
-      const { groups, profiles, hiddenCatalogIds } = latest.current ?? { groups: [], profiles: [], hiddenCatalogIds: [] };
-      const m = await loadMembership(groups, profiles);
+      const { profiles, hiddenCatalogIds } = latest.current ?? { profiles: [], hiddenCatalogIds: [] };
+      const m = await loadMembership(profiles);
       const hidden = new Set(hiddenCatalogIds);
       setRows(hidden.size === 0 ? all : all.map((p) => ({ ...p, catalogs: p.catalogs.filter((c) => !hidden.has(c.id)) })));
       setMembership(m);

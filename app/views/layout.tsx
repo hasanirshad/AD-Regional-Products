@@ -5,8 +5,7 @@ import { useProductsLoad, useProductsUi, type Shared } from "./products-state";
 import { useLoadAppState } from "./state";
 
 // Layout: navigation, shared state, loading and error shell.
-// Overview is the home route. Groups and Products are hidden from the menu for
-// now (their routes still work by address).
+// Overview is the home route, then Products.
 export default function Layout() {
   const { loaded, reload } = useLoadAppState();
   const app = loaded.status === "ready" ? loaded.state : null;
@@ -22,6 +21,7 @@ export default function Layout() {
     <>
       <s-app-nav>
         <s-link href="/">Overview</s-link>
+        <s-link href="/products">Products</s-link>
       </s-app-nav>
       <Gate
         status={loaded.status}

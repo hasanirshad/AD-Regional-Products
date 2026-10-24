@@ -5,6 +5,8 @@
 // - Retry on HTTP 429 and on THROTTLED errors, exponential backoff.
 // - Slows down when the cost bucket is nearly empty.
 
+import { assertUnlocked, isMutation } from "./guard";
+
 const ENDPOINT = "shopify:admin/api/graphql.json";
 export const TIMEOUT_MS = 30_000;
 export const MAX_ATTEMPTS = 5;
@@ -49,6 +51,7 @@ export type AdminOptions = {
   sleep?: (ms: number) => Promise<void>;
   timeoutMs?: number;
   maxAttempts?: number;
+  env?: () => BrowserEnv;
 };
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -82,11 +85,66 @@ const NO_ANSWER =
   "No answer from Shopify. Direct API access only works inside the Shopify admin. " +
   "Open the app from Apps in your admin (not in a separate browser tab) and try again.";
 
+export type BrowserEnv = {
+  /** The page is inside the admin iframe (not a tab of its own). */
+  embedded: boolean;
+  /** App Bridge created `window.shopify`. */
+  appBridge: boolean;
+  /** The shopify-api-key meta tag has a value. */
+  apiKey: boolean;
+};
+
+/** Reads what the browser can tell us. Safe outside a browser (tests). */
+export function readBrowserEnv(): BrowserEnv {
+  if (typeof window === "undefined") {
+    return { embedded: true, appBridge: true, apiKey: true };
+  }
+  let embedded = true;
+  try {
+    embedded = window.top !== window.self;
+  } catch {
+    embedded = true; // cross-origin parent: we are inside an iframe
+  }
+  const key = document
+    .querySelector('meta[name="shopify-api-key"]')
+    ?.getAttribute("content");
+  return {
+    embedded,
+    appBridge: Boolean((window as unknown as { shopify?: unknown }).shopify),
+    apiKey: Boolean(key),
+  };
+}
+
+/** Plain-language reason for a request that was refused before any answer. */
+export function explainFetchFailure(env: BrowserEnv): string {
+  if (!env.embedded) {
+    return (
+      "This page is open on its own, not inside the Shopify admin. Direct API access only works inside the admin. " +
+      "Open the app from Apps in your admin, or press p in the terminal running npm run dev to open the preview link."
+    );
+  }
+  if (!env.apiKey) {
+    return "The app's client id is missing from the page (SHOPIFY_API_KEY was empty when the app was built or started).";
+  }
+  if (!env.appBridge) {
+    return (
+      "App Bridge did not load, so requests to Shopify are blocked. " +
+      "Check that cdn.shopify.com is not blocked (ad blocker, network filter) and reload."
+    );
+  }
+  return (
+    "Shopify refused the request. Check that direct API access is on for this app " +
+    "(embedded_app_direct_api_access in shopify.app.toml) and that the app config was released, then reload."
+  );
+}
+
 export async function adminGraphql<T = unknown>(
   query: string,
   variables: Record<string, unknown> = {},
   options: AdminOptions = {},
 ): Promise<T> {
+  // Every write goes through here: refuse it unless the password was entered.
+  if (isMutation(query)) assertUnlocked();
   const fetcher: FetchLike = options.fetcher ?? ((url, init) => fetch(url, init));
   const sleep = options.sleep ?? defaultSleep;
   const timeoutMs = options.timeoutMs ?? TIMEOUT_MS;
@@ -119,6 +177,14 @@ export async function adminGraphql<T = unknown>(
     } catch (err) {
       if (err instanceof AdminError) throw err;
       if ((err as { name?: string })?.name === "AbortError") throw new AdminError(NO_ANSWER);
+      if (err instanceof TypeError) {
+        // The browser refused the shopify: request (usually "Failed to fetch").
+        const env = (options.env ?? readBrowserEnv)();
+        throw new AdminError(explainFetchFailure(env), {
+          env,
+          original: err.message,
+        });
+      }
       throw new AdminError(`Could not reach Shopify: ${(err as Error)?.message ?? String(err)}`);
     } finally {
       clearTimeout(timer);

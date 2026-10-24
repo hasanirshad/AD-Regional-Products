@@ -4,10 +4,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useOutletContext } from "react-router";
-import { EMPTY_GROUPS, GROUPS_KEY, parseGroupsFile } from "../lib/groups";
-import { loadGeneral, loadMarkets, loadProfiles, loadShop } from "../lib/shopify-data";
-import { readJson } from "../lib/store";
-import type { GeneralProfile, Group, Market, ProfileSummary } from "../lib/types";
+import { loadMarkets, loadProfiles, loadShop } from "../lib/shopify-data";
+import type { Market, ProfileSummary } from "../lib/types";
 import type { Shared } from "./products-state";
 
 export type AppData = {
@@ -16,9 +14,6 @@ export type AppData = {
   /** Catalogues of hidden markets. Products' catalogue lists ignore them. */
   hiddenCatalogIds: string[];
   profiles: ProfileSummary[];
-  /** The General profile in full. Null if the store has no default profile. */
-  general: GeneralProfile | null;
-  groups: Group[];
 };
 
 export type AppState = AppData & {
@@ -27,16 +22,9 @@ export type AppState = AppData & {
 };
 
 async function loadAll(): Promise<AppData> {
-  const [shop, marketData, profiles, saved] = await Promise.all([
-    loadShop(),
-    loadMarkets(),
-    loadProfiles(),
-    readJson<unknown>(GROUPS_KEY, EMPTY_GROUPS),
-  ]);
-  const defaultProfile = profiles.find((p) => p.isDefault);
-  const general = defaultProfile ? await loadGeneral(defaultProfile.id) : null;
+  const [shop, marketData, profiles] = await Promise.all([loadShop(), loadMarkets(), loadProfiles()]);
   const { markets, hiddenCatalogIds } = marketData;
-  return { shop, markets, hiddenCatalogIds, profiles, general, groups: parseGroupsFile(saved).groups };
+  return { shop, markets, hiddenCatalogIds, profiles };
 }
 
 export type Loaded =

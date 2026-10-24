@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { activeChips, ANY, applyFilters, filterOptions, NO_FILTERS, NONE } from "./filter";
 import { parseProduct } from "./parse";
-import type { Filters, Group, ProductRow } from "./types";
+import type { Filters, ProductRow } from "./types";
 
 const row = (id: string, over: Partial<ProductRow> = {}): ProductRow => ({
   id: `gid://shopify/Product/${id}`,
@@ -46,10 +46,10 @@ describe("applyFilters", () => {
     expect(ids(applyFilters(rows, f({ catalog: ANY }), {}))).toEqual(["1", "3"]);
     expect(ids(applyFilters(rows, f({ catalog: "c2" }), {}))).toEqual(["3"]);
   });
-  it("group: not in a group, or a specific group", () => {
+  it("profile: General, or a specific profile", () => {
     const membership = { [rows[0]!.id]: "gA", [rows[2]!.id]: "gB" };
-    expect(ids(applyFilters(rows, f({ group: NONE }), membership))).toEqual(["2"]);
-    expect(ids(applyFilters(rows, f({ group: "gB" }), membership))).toEqual(["3"]);
+    expect(ids(applyFilters(rows, f({ profile: NONE }), membership))).toEqual(["2"]);
+    expect(ids(applyFilters(rows, f({ profile: "gB" }), membership))).toEqual(["3"]);
   });
   it("combines filters", () => {
     expect(ids(applyFilters(rows, f({ catalog: "c1", search: "stool" }), {}))).toEqual(["3"]);
@@ -68,18 +68,17 @@ describe("filterOptions", () => {
 });
 
 describe("activeChips", () => {
-  const groups: Group[] = [{ id: "gA", name: "Froede", countries: [], profileId: null }];
-  const lookups = { catalogs: [{ id: "c1", title: "UK" }], groups };
+  const lookups = { catalogs: [{ id: "c1", title: "UK" }], profiles: [{ id: "gA", name: "Froede" }] };
   it("is empty with no filters", () => {
     expect(activeChips(NO_FILTERS, lookups)).toEqual([]);
   });
   it("labels each active filter", () => {
-    const chips = activeChips(f({ status: "DRAFT", catalog: NONE, group: "gA", tag: "oak" }), lookups);
+    const chips = activeChips(f({ status: "DRAFT", catalog: NONE, profile: "gA", tag: "oak" }), lookups);
     expect(chips.map((c) => c.label)).toEqual([
       "Status: draft",
       "Tag: oak",
       "Not in any catalogue",
-      "Group: Froede",
+      "Profile: Froede",
     ]);
   });
   it("names a specific catalogue", () => {

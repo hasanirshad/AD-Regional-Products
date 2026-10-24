@@ -2,18 +2,7 @@
 // Pure functions: no network, easy to test.
 
 import { isHiddenMarket } from "./hidden";
-import type {
-  GeneralProfile,
-  ProductRow,
-  LocationGroup,
-  Market,
-  Method,
-  Operator,
-  ProfileSummary,
-  RateCondition,
-  Zone,
-  ZoneCountry,
-} from "./types";
+import type { Market, ProductRow, ProfileSummary } from "./types";
 
 // ---- Markets -----------------------------------------------------------
 
@@ -97,107 +86,6 @@ export function parseProfileSummary(raw: RawProfileSummary): ProfileSummary {
     rateCount: raw.activeMethodDefinitionsCount ?? 0,
     zonesTruncated: raw.profileLocationGroups.some((g) => g.locationGroupZones.pageInfo?.hasNextPage === true),
   };
-}
-
-// ---- General profile (full) -------------------------------------------
-
-type RawCondition = {
-  field: string;
-  operator: string;
-  conditionCriteria:
-    | { __typename: "MoneyV2"; amount: string; currencyCode: string }
-    | { __typename: "Weight"; value: number; unit: string }
-    | { __typename: string };
-};
-
-export type RawGeneral = {
-  id: string;
-  name: string;
-  profileLocationGroups: {
-    locationGroup: { id: string; locations: { nodes: { id: string; name: string }[] } };
-    locationGroupZones: {
-      nodes: {
-        zone: {
-          id: string;
-          name: string;
-          countries: {
-            code: { countryCode: string | null; restOfWorld: boolean };
-            provinces: { code: string }[];
-          }[];
-        };
-        methodDefinitions: {
-          nodes: {
-            name: string;
-            active: boolean;
-            description: string | null;
-            rateProvider:
-              | { __typename: "DeliveryRateDefinition"; price: { amount: string; currencyCode: string } }
-              | { __typename: string };
-            methodConditions: RawCondition[];
-          }[];
-        };
-      }[];
-    };
-  }[];
-};
-
-const OPERATORS: Operator[] = ["GREATER_THAN_OR_EQUAL_TO", "LESS_THAN_OR_EQUAL_TO"];
-
-function parseCondition(c: RawCondition): RateCondition | string {
-  const operator = OPERATORS.find((o) => o === c.operator);
-  if (!operator) return `Unknown condition operator ${c.operator}`;
-  const crit = c.conditionCriteria as Record<string, unknown>;
-  if (c.field === "TOTAL_WEIGHT" && crit.__typename === "Weight") {
-    return { kind: "weight", operator, value: Number(crit.value), unit: String(crit.unit) };
-  }
-  if (c.field === "TOTAL_PRICE" && crit.__typename === "MoneyV2") {
-    return { kind: "price", operator, amount: String(crit.amount), currencyCode: String(crit.currencyCode) };
-  }
-  return `Unknown condition ${c.field}`;
-}
-
-function parseMethod(m: RawGeneral["profileLocationGroups"][number]["locationGroupZones"]["nodes"][number]["methodDefinitions"]["nodes"][number]): Method {
-  const conditions: RateCondition[] = [];
-  let unsupported: string | null = null;
-  for (const c of m.methodConditions) {
-    const parsed = parseCondition(c);
-    if (typeof parsed === "string") unsupported = parsed;
-    else conditions.push(parsed);
-  }
-  const provider = m.rateProvider as { __typename: string; price?: { amount: string; currencyCode: string } };
-  const kind: Method["kind"] =
-    provider.__typename === "DeliveryRateDefinition" && provider.price
-      ? "rate"
-      : provider.__typename === "DeliveryParticipant"
-        ? "carrier"
-        : "unknown";
-  return {
-    name: m.name,
-    description: m.description,
-    active: m.active,
-    kind,
-    price: kind === "rate" && provider.price ? { ...provider.price } : null,
-    conditions,
-    unsupported,
-  };
-}
-
-export function parseGeneral(raw: RawGeneral): GeneralProfile {
-  const locationGroups: LocationGroup[] = raw.profileLocationGroups.map((lg) => ({
-    id: lg.locationGroup.id,
-    locations: lg.locationGroup.locations.nodes.map((l) => ({ id: l.id, name: l.name })),
-    zones: lg.locationGroupZones.nodes.map((n): Zone => ({
-      id: n.zone.id,
-      name: n.zone.name,
-      countries: n.zone.countries.map((c): ZoneCountry => ({
-        code: c.code.countryCode ? c.code.countryCode.toUpperCase() : null,
-        restOfWorld: c.code.restOfWorld,
-        provinces: c.provinces.map((p) => p.code),
-      })),
-      methods: n.methodDefinitions.nodes.map(parseMethod),
-    })),
-  }));
-  return { id: raw.id, name: raw.name, locationGroups };
 }
 
 // ---- Products ----------------------------------------------------------

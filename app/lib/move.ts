@@ -1,4 +1,4 @@
-// What moving products into a group (or back to General) would change.
+// What moving products into a shipping profile (or back to General) would change.
 // Pure planning, used for the review step. Nothing here writes to Shopify.
 
 import {
@@ -12,8 +12,8 @@ import {
 import type { Market, MarketCatalog, Membership, ProductRow } from "./types";
 
 /**
- * full: publish where the group ships, unpublish where it ships nowhere.
- * unpublish: only remove products from markets the group cannot sell to.
+ * full: publish where the profile ships, unpublish where it ships nowhere.
+ * unpublish: only remove products from markets the profile cannot sell to.
  * none: leave catalogues alone.
  */
 export type VisibilityMode = "full" | "unpublish" | "none";
@@ -55,7 +55,7 @@ export function planMove(input: {
   const { products, membership, target, shippers, mode } = input;
   const markets = sellingMarkets(input.markets);
   const covs = markets.map((m) => coverage(target.profile, m));
-  const nameOf = (key: string) => shippers.find((s) => s.key === key)?.name ?? "unknown group";
+  const nameOf = (key: string) => shippers.find((s) => s.key === key)?.name ?? "unknown profile";
   const warnings: string[] = [];
 
   const lines: MoveLine[] = [];
@@ -98,7 +98,7 @@ export function planMove(input: {
   };
 
   let blocker: string | null = null;
-  if (!target.profile) blocker = `"${target.name}" has no shipping profile in Shopify. Save the group on the Groups page first.`;
+  if (!target.profile) blocker = `"${target.name}" has no shipping profile in Shopify. It may have been deleted in Shopify.`;
   else if (lines.length === 0) blocker = "Nothing would change with these settings.";
 
   if (target.profile && target.profile.rateCount === 0) {

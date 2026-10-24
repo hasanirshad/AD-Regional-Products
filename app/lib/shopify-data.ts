@@ -1,19 +1,18 @@
-// Reads from and writes to Shopify. Raw answers go through parse.ts.
+// Reads from Shopify (writes are in applyMove.ts). Raw answers go through parse.ts.
 // UNVERIFIED against a real store: every query and mutation here still has
 // to be run on dev-appsdapps. Errors are shown to the user as they are.
 
-import { adminGraphql, assertNoUserErrors } from "./admin";
+import { adminGraphql } from "./admin";
 import {
-  parseGeneral,
-  hiddenCatalogIds, parseMarkets,
+  hiddenCatalogIds,
+  parseMarkets,
   parseProduct,
   parseProfileSummary,
-  type RawGeneral,
   type RawMarkets,
   type RawProduct,
   type RawProfileSummary,
 } from "./parse";
-import type { GeneralProfile, Group, Market, Membership, ProductRow, ProfileSummary } from "./types";
+import type { Market, Membership, ProductRow, ProfileSummary } from "./types";
 
 const SHOP = `#graphql
   query Shop { shop { name myshopifyDomain } }`;
@@ -67,68 +66,6 @@ const PROFILES = `#graphql
     }
   }`;
 
-const GENERAL = `#graphql
-  query General($id: ID!) {
-    deliveryProfile(id: $id) {
-      id
-      name
-      profileLocationGroups {
-        locationGroup {
-          id
-          locations(first: 50) { nodes { id name } }
-        }
-        locationGroupZones(first: 50) {
-          nodes {
-            zone {
-              id
-              name
-              countries {
-                code { countryCode restOfWorld }
-                provinces { code }
-              }
-            }
-            methodDefinitions(first: 25) {
-              nodes {
-                name
-                active
-                description
-                rateProvider {
-                  __typename
-                  ... on DeliveryRateDefinition { price { amount currencyCode } }
-                }
-                methodConditions {
-                  field
-                  operator
-                  conditionCriteria {
-                    __typename
-                    ... on MoneyV2 { amount currencyCode }
-                    ... on Weight { value unit }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }`;
-
-const CREATE_PROFILE = `#graphql
-  mutation CreateProfile($profile: DeliveryProfileInput!) {
-    deliveryProfileCreate(profile: $profile) {
-      profile { id name }
-      userErrors { field message }
-    }
-  }`;
-
-const UPDATE_PROFILE = `#graphql
-  mutation UpdateProfile($id: ID!, $profile: DeliveryProfileInput!) {
-    deliveryProfileUpdate(id: $id, profile: $profile) {
-      profile { id name }
-      userErrors { field message }
-    }
-  }`;
-
 export async function loadShop(): Promise<{ name: string; domain: string }> {
   const data = await adminGraphql<{ shop: { name: string; myshopifyDomain: string } }>(SHOP);
   return { name: data.shop.name, domain: data.shop.myshopifyDomain };
@@ -158,32 +95,6 @@ export async function loadProfiles(): Promise<ProfileSummary[]> {
 }
 
 /** The General (default) profile in full: zones, rates, conditions. */
-export async function loadGeneral(id: string): Promise<GeneralProfile> {
-  const data = await adminGraphql<{ deliveryProfile: RawGeneral | null }>(GENERAL, { id });
-  if (!data.deliveryProfile) throw new Error("The General shipping profile could not be read.");
-  return parseGeneral(data.deliveryProfile);
-}
-
-export async function createProfile(profile: unknown): Promise<string> {
-  const data = await adminGraphql<{
-    deliveryProfileCreate: {
-      profile: { id: string } | null;
-      userErrors: { field: string[] | null; message: string }[];
-    };
-  }>(CREATE_PROFILE, { profile });
-  assertNoUserErrors(data.deliveryProfileCreate.userErrors, "Creating the shipping profile");
-  const id = data.deliveryProfileCreate.profile?.id;
-  if (!id) throw new Error("Shopify did not return the new shipping profile.");
-  return id;
-}
-
-export async function updateProfile(id: string, profile: unknown): Promise<void> {
-  const data = await adminGraphql<{
-    deliveryProfileUpdate: { userErrors: { field: string[] | null; message: string }[] };
-  }>(UPDATE_PROFILE, { id, profile });
-  assertNoUserErrors(data.deliveryProfileUpdate.userErrors, "Updating the shipping profile");
-}
-
 // ---- Products ----------------------------------------------------------
 
 // 25 per page with up to 10 catalogues each keeps one request well under
@@ -238,12 +149,12 @@ export async function loadProductsPage(
   };
 }
 
-/** Which group each product is in now, read from the groups' shipping profiles. */
-export async function loadMembership(groups: Group[], profiles: ProfileSummary[]): Promise<Membership> {
+/** Which shipping profile each product is in now (General is the default and is left out). */
+export async function loadMembership(profiles: ProfileSummary[]): Promise<Membership> {
   const membership: Membership = {};
-  for (const g of groups) {
-    const profile = g.profileId ? profiles.find((p) => p.id === g.profileId) : undefined;
-    if (!profile) continue;
+  for (const profile of profiles) {
+    if (profile.isDefault || profile.variantCount === 0) continue;
+    const key = profile.id;
     let after: string | null = null;
     for (let page = 0; page < 100; page++) {
       const data: {
@@ -256,7 +167,7 @@ export async function loadMembership(groups: Group[], profiles: ProfileSummary[]
       } = await adminGraphql(PROFILE_ITEMS, { id: profile.id, after });
       const items = data.deliveryProfile?.profileItems;
       if (!items) break;
-      for (const n of items.nodes) if (n.product) membership[n.product.id] = g.id;
+      for (const n of items.nodes) if (n.product) membership[n.product.id] = key;
       if (!items.pageInfo.hasNextPage) break;
       after = items.pageInfo.endCursor;
     }

@@ -6,7 +6,7 @@ import { readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 const CLIENT = "build/client";
-const ROUTE_IDS = ["views/layout", "views/groups"];
+const ROUTE_IDS = ["views/layout", "views/overview"];
 
 try {
   const indexPath = join(CLIENT, "index.html");

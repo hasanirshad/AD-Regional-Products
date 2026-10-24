@@ -28,13 +28,13 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function Products() {
-  const { shop, groups, profiles, markets, products, ui, refresh } = useAppState();
+  const { shop, profiles, markets, products, ui, refresh } = useAppState();
   useStartProducts(products);
 
   const { filters, setFilters, selected, setSelected, page, setPage } = ui;
   const [target, setTarget] = useState("");
   const [reviewing, setReviewing] = useState(false);
-  const shippers = useMemo(() => makeShippers(profiles, groups), [profiles, groups]);
+  const shippers = useMemo(() => makeShippers(profiles), [profiles]);
 
   const options = useMemo(() => filterOptions(products.rows), [products.rows]);
   const filtered = useMemo(
@@ -47,11 +47,14 @@ export default function Products() {
   const pageRows = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
   const pageAllSelected = pageRows.length > 0 && pageRows.every((p) => selected.has(p.id));
 
-  const groupName = (id: string | undefined) => groups.find((g) => g.id === id)?.name;
-  // Only groups whose shipping profile exists can receive products.
-  const usableGroups = groups.filter((g) => g.profileId && profiles.some((p) => p.id === g.profileId));
+  const profileName = (id: string | undefined) => shippers.find((s) => s.key === id)?.name;
+  // Every shipping profile besides General can hold products.
+  const profileChoices = shippers.filter((s) => s.kind === "profile");
 
-  const chips = activeChips(filters, { catalogs: options.catalogs, groups });
+  const chips = activeChips(filters, {
+    catalogs: options.catalogs,
+    profiles: profileChoices.map((s) => ({ id: s.key, name: s.name })),
+  });
   const set = (patch: Partial<Filters>) => setFilters({ ...filters, ...patch });
 
   const toggleOne = (id: string, on: boolean) =>
@@ -187,13 +190,13 @@ export default function Products() {
                   ]}
                 />
                 <SelectField
-                  label="Group"
-                  value={filters.group}
-                  onChange={(group) => set({ group })}
+                  label="Profile"
+                  value={filters.profile}
+                  onChange={(profile) => set({ profile })}
                   options={[
                     { value: "", label: "Any" },
-                    { value: NONE, label: "Not in a group" },
-                    ...groups.map((g) => ({ value: g.id, label: g.name })),
+                    { value: NONE, label: "General (no profile)" },
+                    ...profileChoices.map((s) => ({ value: s.key, label: s.name })),
                   ]}
                 />
               </FilterBar>
@@ -228,18 +231,18 @@ export default function Products() {
                       value={target}
                       onChange={setTarget}
                       options={[
-                        { value: "", label: "Choose a group" },
-                        ...usableGroups.map((g) => ({ value: g.id, label: g.name })),
-                        { value: GENERAL_KEY, label: "General (no group)" },
+                        { value: "", label: "Choose a shipping profile" },
+                        ...profileChoices.map((s) => ({ value: s.key, label: s.name })),
+                        { value: GENERAL_KEY, label: "General (no profile)" },
                       ]}
                     />
                     <s-button variant="primary" onClick={() => setReviewing(true)} disabled={!target || undefined}>
                       Review move
                     </s-button>
                   </s-stack>
-                  {!target ? <s-text color="subdued">Step 1 of 3: choose where to move the selected products. You review everything before anything changes.</s-text> : null}
-                  {usableGroups.length === 0 ? (
-                    <s-text color="subdued">No group has a shipping profile yet. Create one on the Groups page.</s-text>
+                  {!target ? <s-text color="subdued">Step 1 of 3: choose the shipping profile to move the selected products into. You review everything before anything changes.</s-text> : null}
+                  {profileChoices.length === 0 ? (
+                    <s-text color="subdued">This store has no shipping profile besides General. Create one in Shopify under Settings → Shipping.</s-text>
                   ) : null}
                 </s-stack>
               ) : null}
@@ -265,7 +268,7 @@ export default function Products() {
                     <s-table-header>Product</s-table-header>
                     <s-table-header>Status</s-table-header>
                     <s-table-header>Catalogues</s-table-header>
-                    <s-table-header>Group</s-table-header>
+                    <s-table-header>Profile</s-table-header>
                   </s-table-header-row>
                   <s-table-body>
                     {pageRows.map((p) => (
@@ -274,7 +277,7 @@ export default function Products() {
                         p={p}
                         checked={selected.has(p.id)}
                         onCheck={(on) => toggleOne(p.id, on)}
-                        current={groupName(products.membership[p.id])}
+                        current={profileName(products.membership[p.id])}
                       />
                     ))}
                   </s-table-body>

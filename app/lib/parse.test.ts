@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hiddenCatalogIds, parseGeneral, parseMarkets, parseProfileSummary, type RawGeneral } from "./parse";
+import { hiddenCatalogIds, parseMarkets, parseProfileSummary } from "./parse";
 
 describe("parseMarkets", () => {
   it("reads countries from region conditions and ignores other region types", () => {
@@ -91,94 +91,5 @@ describe("parseProfileSummary", () => {
       parseProfileSummary({ id: "p", name: "n", default: true, productVariantsCount: null, profileLocationGroups: [] })
         .variantCount,
     ).toBe(0);
-  });
-});
-
-const raw = (): RawGeneral => ({
-  id: "gid://shopify/DeliveryProfile/1",
-  name: "General",
-  profileLocationGroups: [
-    {
-      locationGroup: { id: "lg1", locations: { nodes: [{ id: "loc1", name: "London" }] } },
-      locationGroupZones: {
-        nodes: [
-          {
-            zone: {
-              id: "z1",
-              name: "UK",
-              countries: [{ code: { countryCode: "GB", restOfWorld: false }, provinces: [{ code: "ENG" }] }],
-            },
-            methodDefinitions: {
-              nodes: [
-                {
-                  name: "Standard",
-                  active: true,
-                  description: null,
-                  rateProvider: { __typename: "DeliveryRateDefinition", price: { amount: "15.0", currencyCode: "EUR" } },
-                  methodConditions: [
-                    {
-                      field: "TOTAL_WEIGHT",
-                      operator: "LESS_THAN_OR_EQUAL_TO",
-                      conditionCriteria: { __typename: "Weight", value: 30, unit: "KILOGRAMS" },
-                    },
-                  ],
-                },
-                {
-                  name: "Courier",
-                  active: true,
-                  description: null,
-                  rateProvider: { __typename: "DeliveryParticipant" },
-                  methodConditions: [],
-                },
-                {
-                  name: "Odd",
-                  active: true,
-                  description: null,
-                  rateProvider: { __typename: "DeliveryRateDefinition", price: { amount: "1.0", currencyCode: "EUR" } },
-                  methodConditions: [
-                    {
-                      field: "SOMETHING_NEW",
-                      operator: "LESS_THAN_OR_EQUAL_TO",
-                      conditionCriteria: { __typename: "Weight", value: 1, unit: "KILOGRAMS" },
-                    },
-                  ],
-                },
-              ],
-            },
-          },
-          {
-            zone: {
-              id: "z2",
-              name: "Rest of world",
-              countries: [{ code: { countryCode: null, restOfWorld: true }, provinces: [] }],
-            },
-            methodDefinitions: { nodes: [] },
-          },
-        ],
-      },
-    },
-  ],
-});
-
-describe("parseGeneral", () => {
-  it("maps zones, countries, provinces and location names", () => {
-    const g = parseGeneral(raw());
-    expect(g.locationGroups[0]?.locations).toEqual([{ id: "loc1", name: "London" }]);
-    expect(g.locationGroups[0]?.zones[0]?.countries).toEqual([
-      { code: "GB", restOfWorld: false, provinces: ["ENG"] },
-    ]);
-    expect(g.locationGroups[0]?.zones[1]?.countries).toEqual([{ code: null, restOfWorld: true, provinces: [] }]);
-  });
-
-  it("recognises flat rates with conditions, carrier rates and unknown conditions", () => {
-    const methods = parseGeneral(raw()).locationGroups[0]?.zones[0]?.methods ?? [];
-    expect(methods[0]).toMatchObject({
-      kind: "rate",
-      price: { amount: "15.0", currencyCode: "EUR" },
-      conditions: [{ kind: "weight", operator: "LESS_THAN_OR_EQUAL_TO", value: 30, unit: "KILOGRAMS" }],
-      unsupported: null,
-    });
-    expect(methods[1]).toMatchObject({ kind: "carrier", price: null });
-    expect(methods[2]?.unsupported).toMatch(/SOMETHING_NEW/);
   });
 });

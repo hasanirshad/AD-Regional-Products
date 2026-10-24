@@ -2,7 +2,7 @@
 // (market catalogues) and where they can actually be bought (shipping profile).
 // Pure functions, no Shopify calls.
 
-import type { Group, Market, Membership, ProductRow, ProfileSummary } from "./types";
+import type { Market, Membership, ProductRow, ProfileSummary } from "./types";
 
 /** How one product stands in one market. */
 export type CellState =
@@ -12,10 +12,12 @@ export type CellState =
   | "unpublished"; // not in this market's catalogue
 
 export type Shipper = {
-  /** Group id, or GENERAL for products in no group. */
+  /** The profile id, or GENERAL for the default profile. */
   key: string;
   name: string;
   profile: ProfileSummary | null;
+  /** general = the default profile (products in no other profile). */
+  kind: "general" | "profile";
 };
 
 export const GENERAL = "__general__";
@@ -25,15 +27,13 @@ export function shipsTo(profile: Pick<ProfileSummary, "countries" | "restOfWorld
   return profile.restOfWorld || profile.countries.includes(code.toUpperCase());
 }
 
-/** General first, then one per group (profile null when it does not exist). */
-export function makeShippers(profiles: ProfileSummary[], groups: Group[]): Shipper[] {
+/** General first, then every other shipping profile in the store. */
+export function makeShippers(profiles: ProfileSummary[]): Shipper[] {
   return [
-    { key: GENERAL, name: "General (no group)", profile: profiles.find((p) => p.isDefault) ?? null },
-    ...groups.map((g) => ({
-      key: g.id,
-      name: g.name,
-      profile: profiles.find((p) => p.id === g.profileId) ?? null,
-    })),
+    { key: GENERAL, name: "General (no profile)", profile: profiles.find((p) => p.isDefault) ?? null, kind: "general" },
+    ...profiles
+      .filter((p) => !p.isDefault)
+      .map((p): Shipper => ({ key: p.id, name: p.name, profile: p, kind: "profile" })),
   ];
 }
 
@@ -75,11 +75,10 @@ export type MarketSummary = {
   counts: Record<CellState, number>;
 };
 
-export type GroupSummary = {
+export type ProfileRow = {
   key: string;
   name: string;
-  /** Countries the group is meant to allow. General has none to compare with. */
-  allowed: string[];
+  kind: Shipper["kind"];
   profile: ProfileSummary | null;
   products: number;
   perMarket: { coverage: Coverage; counts: Record<CellState, number> }[];
@@ -99,24 +98,24 @@ export type Issue = {
 export type Focus = {
   /** Only active products. */
   activeOnly: boolean;
-  groupKey: string;
+  profileKey: string;
   marketId: string;
   /** With a market: that market's state. "published" = anything but unpublished. */
   state: "" | CellState | "published";
   catalogId: string;
   /** "" all, "nocat" in no catalogue, "problem" published where it cannot be bought, "ok" no problems. */
   show: "" | "nocat" | "problem" | "ok";
-  inAnyGroup: boolean;
+  inProfile: boolean;
 };
 
 export const NO_FOCUS: Focus = {
   activeOnly: false,
-  groupKey: "",
+  profileKey: "",
   marketId: "",
   state: "",
   catalogId: "",
   show: "",
-  inAnyGroup: false,
+  inProfile: false,
 };
 
 export const focusOf = (patch: Partial<Focus>): Focus => ({ ...NO_FOCUS, ...patch });
@@ -124,8 +123,8 @@ export const focusOf = (patch: Partial<Focus>): Focus => ({ ...NO_FOCUS, ...patc
 export function matchFocus(l: ProductLine, f: Focus): boolean {
   const p = l.product;
   if (f.activeOnly && p.status !== "ACTIVE") return false;
-  if (f.groupKey && l.groupKey !== f.groupKey) return false;
-  if (f.inAnyGroup && l.groupKey === GENERAL) return false;
+  if (f.profileKey && l.profileKey !== f.profileKey) return false;
+  if (f.inProfile && l.kind !== "profile") return false;
   if (f.catalogId && !p.catalogs.some((c) => c.id === f.catalogId)) return false;
   if (f.state) {
     const cells = f.marketId ? [l.cells[f.marketId]] : Object.values(l.cells);
@@ -142,8 +141,9 @@ export function matchFocus(l: ProductLine, f: Focus): boolean {
 
 export type ProductLine = {
   product: ProductRow;
-  groupKey: string;
-  groupName: string;
+  profileKey: string;
+  profileName: string;
+  kind: Shipper["kind"];
   cells: Record<string, CellState>; // by market id
   /** True when it is published somewhere it cannot be bought (fully or partly). */
   hasProblem: boolean;
@@ -153,13 +153,14 @@ export type Overview = {
   totals: {
     products: number;
     active: number;
-    inGroups: number;
+    /** In a profile other than General. */
+    inProfiles: number;
     noCatalogue: number;
-    groups: number;
+    profiles: number;
     markets: number;
   };
   markets: MarketSummary[];
-  groups: GroupSummary[];
+  profiles: ProfileRow[];
   catalogs: CatalogSummary[];
   lines: ProductLine[];
   issues: Issue[];
@@ -168,24 +169,17 @@ export type Overview = {
 
 const emptyCounts = (): Record<CellState, number> => ({ sellable: 0, partial: 0, blocked: 0, unpublished: 0 });
 
-function sameSet(a: string[], b: string[]): boolean {
-  const x = new Set(a.map((c) => c.toUpperCase()));
-  const y = new Set(b.map((c) => c.toUpperCase()));
-  return x.size === y.size && [...x].every((c) => y.has(c));
-}
-
 export function buildOverview(input: {
   markets: Market[];
   profiles: ProfileSummary[];
-  groups: Group[];
   rows: ProductRow[];
   membership: Membership;
 }): Overview {
-  const { profiles, groups, rows, membership } = input;
+  const { profiles, rows, membership } = input;
   const markets = sellingMarkets(input.markets);
   const general = profiles.find((p) => p.isDefault) ?? null;
 
-  const shippers = makeShippers(profiles, groups);
+  const shippers = makeShippers(profiles);
   const shipperOf = (productId: string): Shipper => {
     const gid = membership[productId];
     return shippers.find((s) => s.key === gid && s.profile) ?? shippers[0]!;
@@ -206,7 +200,7 @@ export function buildOverview(input: {
       if (cov) cells[m.id] = cellState(isPublishedIn(product, m), cov);
     });
     const hasProblem = Object.values(cells).some((c) => c === "blocked" || c === "partial");
-    return { product, groupKey: s.key, groupName: s.name, cells, hasProblem };
+    return { product, profileKey: s.key, profileName: s.name, kind: s.kind, cells, hasProblem };
   });
   const activeLines = lines.filter((l) => l.product.status === "ACTIVE");
 
@@ -219,13 +213,12 @@ export function buildOverview(input: {
     return { market, catalogs: market.catalogs.map((c) => c.title), counts };
   });
 
-  const groupSummaries: GroupSummary[] = shippers.map((s) => {
-    const mine = activeLines.filter((l) => l.groupKey === s.key);
-    const group = groups.find((g) => g.id === s.key);
+  const profileRows: ProfileRow[] = shippers.map((s) => {
+    const mine = activeLines.filter((l) => l.profileKey === s.key);
     return {
       key: s.key,
       name: s.name,
-      allowed: group?.countries ?? [],
+      kind: s.kind,
       profile: s.profile,
       products: mine.length,
       perMarket: (coverageBy.get(s.key) ?? []).map((cov) => {
@@ -263,46 +256,20 @@ export function buildOverview(input: {
       focus: focusOf({ show: "nocat" }),
     });
   }
-  for (const g of groups) {
-    const profile = profiles.find((p) => p.id === g.profileId);
-    if (!g.profileId) {
-      issues.push({
-        level: "warning",
-        title: `Group "${g.name}" has no shipping profile yet`,
-        detail: "Open the group and save it to create the profile. Products cannot be moved into it before that.",
-        focus: focusOf({ groupKey: g.id }),
-      });
-      continue;
-    }
-    if (!profile) {
+  for (const s of shippers) {
+    if (s.kind !== "profile" || !s.profile) continue;
+    if (s.profile.rateCount === 0 && s.profile.variantCount > 0) {
       issues.push({
         level: "critical",
-        title: `Group "${g.name}": its shipping profile is missing in Shopify`,
-        detail: "It was deleted outside the app. Open the group and save it to create it again.",
-        focus: focusOf({ groupKey: g.id }),
-      });
-      continue;
-    }
-    if (profile.rateCount === 0) {
-      issues.push({
-        level: "critical",
-        title: `Profile "${profile.name}" has no active shipping rates`,
-        detail: "Customers cannot check out products in this group. Add rates in Shopify shipping settings.",
-        focus: focusOf({ groupKey: g.id }),
+        title: `Profile "${s.name}" has no active shipping rates`,
+        detail: "Customers cannot check out products in this profile. Add rates in Shopify shipping settings.",
+        focus: focusOf({ profileKey: s.key }),
       });
     }
-    if (!profile.zonesTruncated && !profile.restOfWorld && !sameSet(profile.countries, g.countries)) {
-      issues.push({
-        level: "warning",
-        title: `Profile "${profile.name}" ships to different countries than the group allows`,
-        detail: "It was probably edited in Shopify. Open the group and save it to realign the profile.",
-        focus: focusOf({ groupKey: g.id }),
-      });
-    }
-    if (profile.zonesTruncated) {
+    if (s.profile.zonesTruncated) {
       issues.push({
         level: "info",
-        title: `Profile "${profile.name}" has many zones`,
+        title: `Profile "${s.name}" has many zones`,
         detail: "Only the first zones were read, so the checkout countries shown for it may be incomplete.",
       });
     }
@@ -314,14 +281,14 @@ export function buildOverview(input: {
       detail: "Shopify always has one. Reload the app; if this stays, check the app's shipping access.",
     });
   }
-  for (const gs of groupSummaries) {
+  for (const gs of profileRows) {
     for (const pm of gs.perMarket) {
       if (pm.counts.blocked > 0) {
         issues.push({
           level: "critical",
           title: `${pm.counts.blocked} ${gs.name} product${pm.counts.blocked === 1 ? "" : "s"} published in ${pm.coverage.market.name} but cannot be bought there`,
-          detail: `${gs.name} ships to none of ${pm.coverage.market.name}'s countries. Unpublish them from that market, or add the countries to the group.`,
-          focus: focusOf({ groupKey: gs.key, marketId: pm.coverage.market.id, state: "blocked", activeOnly: true }),
+          detail: `${gs.name} ships to none of ${pm.coverage.market.name}'s countries. Unpublish them from that market, or add the countries to the profile in Shopify.`,
+          focus: focusOf({ profileKey: gs.key, marketId: pm.coverage.market.id, state: "blocked", activeOnly: true }),
         });
       }
     }
@@ -344,13 +311,13 @@ export function buildOverview(input: {
     totals: {
       products: rows.length,
       active: active.length,
-      inGroups: rows.filter((r) => membership[r.id]).length,
+      inProfiles: lines.filter((l) => l.kind === "profile").length,
       noCatalogue,
-      groups: groups.length,
+      profiles: shippers.length - 1,
       markets: markets.length,
     },
     markets: marketSummaries,
-    groups: groupSummaries,
+    profiles: profileRows,
     catalogs: [...catalogMap.values()],
     lines,
     issues,

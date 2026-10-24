@@ -6,6 +6,7 @@ import { planMove, type VisibilityMode } from "../lib/move";
 import type { Shipper } from "../lib/overview";
 import type { Market, Membership, ProductRow } from "../lib/types";
 import { Loading } from "./Loading";
+import { useGuard } from "./PasswordGate";
 import { SelectField } from "./SelectField";
 
 type Step = "review" | "applying" | "done";
@@ -45,6 +46,7 @@ export function MoveReview({
   const [result, setResult] = useState<MoveResult | null>(null);
   const [crash, setCrash] = useState("");
   const stop = useRef(false);
+  const guard = useGuard();
 
   const plan = useMemo(
     () => planMove({ products, membership, target, shippers, markets, mode }),
@@ -134,6 +136,7 @@ export function MoveReview({
 
   return (
     <s-stack gap="large-100">
+      {guard.modal}
       <s-section heading="Step 2 of 3 · Review. Nothing has changed yet.">
         <s-stack gap="base">
           <s-paragraph>
@@ -261,7 +264,7 @@ export function MoveReview({
             <s-button
               variant="primary"
               disabled={!confirmed || plan.blocker ? true : undefined}
-              onClick={() => void run()}
+              onClick={() => guard.ask(run)}
             >
               Apply changes
             </s-button>

@@ -12,7 +12,7 @@ import {
   NO_FOCUS,
   type CellState,
   type Focus,
-  type GroupSummary,
+  type ProfileRow,
   type Issue,
   type ProductLine,
 } from "../lib/overview";
@@ -128,14 +128,14 @@ function CountsCell({
   );
 }
 
-function ProfileBadge({ g }: { g: GroupSummary }) {
+function ProfileBadge({ g }: { g: ProfileRow }) {
   if (!g.profile) return <s-badge tone="warning">No profile</s-badge>;
   if (g.profile.rateCount === 0) return <s-badge tone="critical">No rates</s-badge>;
   return <s-badge tone="success">Active</s-badge>;
 }
 
 export default function Overview() {
-  const { shop, markets, profiles, groups, products } = useAppState();
+  const { shop, markets, profiles, products } = useAppState();
   useStartProducts(products);
 
   const [tab, setTab] = useState<"overview" | "products">("overview");
@@ -146,9 +146,9 @@ export default function Overview() {
   const overview = useMemo(
     () =>
       products.status === "ready"
-        ? buildOverview({ markets, profiles, groups, rows: products.rows, membership: products.membership })
+        ? buildOverview({ markets, profiles, rows: products.rows, membership: products.membership })
         : null,
-    [markets, profiles, groups, products.status, products.rows, products.membership],
+    [markets, profiles, products.status, products.rows, products.membership],
   );
 
   const heading = `Overview · ${shop.name}`;
@@ -190,7 +190,7 @@ export default function Overview() {
   const { totals, issues } = overview;
   const sellMarkets = overview.markets.map((m) => m.market);
   const countries = countryMatrix(markets, overview.shippers);
-  const groupName = (key: string) => overview.shippers.find((s) => s.key === key)?.name ?? key;
+  const profileName = (key: string) => overview.shippers.find((s) => s.key === key)?.name ?? key;
   const marketName = (id: string) => sellMarkets.find((m) => m.id === id)?.name ?? id;
   const catalogName = (id: string) => overview.catalogs.find((c) => c.id === id)?.title ?? id;
 
@@ -226,8 +226,8 @@ export default function Overview() {
     const chips = [
       ...(focus.activeOnly ? [{ key: "activeOnly", label: "Active only" }] : []),
       ...(focus.show ? [{ key: "show", label: showLabel[focus.show] }] : []),
-      ...(focus.groupKey ? [{ key: "groupKey", label: `Group: ${groupName(focus.groupKey)}` }] : []),
-      ...(focus.inAnyGroup ? [{ key: "inAnyGroup", label: "In a group" }] : []),
+      ...(focus.profileKey ? [{ key: "profileKey", label: `Profile: ${profileName(focus.profileKey)}` }] : []),
+      ...(focus.inProfile ? [{ key: "inProfile", label: "In a profile" }] : []),
       ...(focus.marketId ? [{ key: "marketId", label: `Market: ${marketName(focus.marketId)}` }] : []),
       ...(focus.state ? [{ key: "state", label: focus.state === "published" ? "Published" : CELL[focus.state].label }] : []),
       ...(focus.catalogId ? [{ key: "catalogId", label: `Catalogue: ${catalogName(focus.catalogId)}` }] : []),
@@ -273,9 +273,9 @@ export default function Overview() {
                     ]}
                   />
                   <SelectField
-                    label="Group"
-                    value={focus.groupKey}
-                    onChange={(v) => set({ groupKey: v, inAnyGroup: false })}
+                    label="Profile"
+                    value={focus.profileKey}
+                    onChange={(v) => set({ profileKey: v, inProfile: false })}
                     options={[{ value: "", label: "Any" }, ...overview.shippers.map((s) => ({ value: s.key, label: s.name }))]}
                   />
                   <SelectField
@@ -305,7 +305,7 @@ export default function Overview() {
                   <s-table>
                     <s-table-header-row>
                       <s-table-header>Product</s-table-header>
-                      <s-table-header>Group</s-table-header>
+                      <s-table-header>Profile</s-table-header>
                       <s-table-header>Catalogues</s-table-header>
                       {sellMarkets.map((m) => (
                         <s-table-header key={m.id}>{m.name}</s-table-header>
@@ -348,7 +348,7 @@ export default function Overview() {
             <s-stack gap="base">
               {issues.length === 0 ? (
                 <s-banner tone="success" heading="No problems found">
-                  <s-paragraph>Every group has a working profile and every published product can be bought where it is published.</s-paragraph>
+                  <s-paragraph>Every shipping profile has rates and every published product can be bought where it is published.</s-paragraph>
                 </s-banner>
               ) : (
                 issues.map((i, n) => <IssueBanner key={n} issue={i} open={open} />)
@@ -358,9 +358,9 @@ export default function Overview() {
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
             <Tile label="Active products" value={totals.active} hint={`${totals.products} in total`} focus={focusOf({ activeOnly: true })} open={open} />
-            <Tile label="In a group" value={totals.inGroups} hint={`${totals.products - totals.inGroups} in General`} focus={focusOf({ inAnyGroup: true })} open={open} />
+            <Tile label="In a profile" value={totals.inProfiles} hint={`${totals.products - totals.inProfiles} in General`} focus={focusOf({ inProfile: true })} open={open} />
             <Tile label="In no catalogue" value={totals.noCatalogue} hint="active, not sold anywhere" focus={focusOf({ show: "nocat" })} open={open} />
-            <Tile label="Groups" value={totals.groups} hint="show their products" focus={focusOf({ inAnyGroup: true })} open={open} />
+            <Tile label="Shipping profiles" value={totals.profiles} hint="besides General" focus={focusOf({ inProfile: true })} open={open} />
             <Tile label="Selling markets" value={totals.markets} hint="show published products" focus={focusOf({ state: "published", activeOnly: true })} open={open} />
           </div>
 
@@ -408,10 +408,11 @@ export default function Overview() {
             </s-stack>
           </s-section>
 
-          <s-section heading="Groups and shipping profiles">
+          <s-section heading="Shipping profiles">
             <s-table>
               <s-table-header-row>
-                <s-table-header>Group</s-table-header>
+                <s-table-header>Profile</s-table-header>
+                <s-table-header>Type</s-table-header>
                 <s-table-header>Ships to</s-table-header>
                 <s-table-header>Profile</s-table-header>
                 <s-table-header>Rates</s-table-header>
@@ -419,24 +420,29 @@ export default function Overview() {
                 <s-table-header>Variants</s-table-header>
               </s-table-header-row>
               <s-table-body>
-                {overview.groups.map((g) => (
+                {overview.profiles.map((g) => (
                   <s-table-row key={g.key}>
                     <s-table-cell>
-                      <Go focus={focusOf({ groupKey: g.key })} open={open} label={`Show products in ${g.name}`}>
+                      <Go focus={focusOf({ profileKey: g.key })} open={open} label={`Show products in ${g.name}`}>
                         {g.name}
                       </Go>
+                    </s-table-cell>
+                    <s-table-cell>
+                      <s-badge tone="neutral">
+                        {g.kind === "general" ? "Default" : "Profile"}
+                      </s-badge>
                     </s-table-cell>
                     <s-table-cell>
                       {g.profile
                         ? g.profile.restOfWorld
                           ? `${summarizeCodes(g.profile.countries, 4)} + rest of world`
                           : summarizeCodes(g.profile.countries, 6)
-                        : summarizeCodes(g.allowed, 6)}
+                        : "—"}
                     </s-table-cell>
                     <s-table-cell><ProfileBadge g={g} /></s-table-cell>
                     <s-table-cell>{g.profile?.rateCount ?? "—"}</s-table-cell>
                     <s-table-cell>
-                      <Go n={g.products} focus={focusOf({ groupKey: g.key, activeOnly: true })} open={open} label={`Show ${g.products} active products in ${g.name}`}>
+                      <Go n={g.products} focus={focusOf({ profileKey: g.key, activeOnly: true })} open={open} label={`Show ${g.products} active products in ${g.name}`}>
                         {g.products}
                       </Go>
                     </s-table-cell>
@@ -447,23 +453,23 @@ export default function Overview() {
             </s-table>
           </s-section>
 
-          <s-section heading="Products by group and market">
+          <s-section heading="Products by profile and market">
             <s-stack gap="base">
-              <s-text color="subdued">Where each group's products are published and whether the market's countries can check out.</s-text>
+              <s-text color="subdued">Where the products of each profile are published and whether the market's countries can check out.</s-text>
               <s-table>
                 <s-table-header-row>
-                  <s-table-header>Group</s-table-header>
+                  <s-table-header>Profile</s-table-header>
                   {sellMarkets.map((m) => (
                     <s-table-header key={m.id}>{m.name}</s-table-header>
                   ))}
                 </s-table-header-row>
                 <s-table-body>
-                  {overview.groups.map((g) => (
+                  {overview.profiles.map((g) => (
                     <s-table-row key={g.key}>
                       <s-table-cell>{g.name}</s-table-cell>
                       {g.perMarket.map((pm) => (
                         <s-table-cell key={pm.coverage.market.id}>
-                          <CountsCell counts={pm.counts} open={open} base={{ groupKey: g.key, marketId: pm.coverage.market.id }} />
+                          <CountsCell counts={pm.counts} open={open} base={{ profileKey: g.key, marketId: pm.coverage.market.id }} />
                           {pm.coverage.state === "mixed" ? (
                             <s-text color="subdued">{`checkout blocks ${summarizeCodes(pm.coverage.blocked, 3)}`}</s-text>
                           ) : pm.coverage.state === "none" ? (
@@ -549,7 +555,7 @@ function ProductLineRow({ line, marketIds }: { line: ProductLine; marketIds: str
           </>
         ) : null}
       </s-table-cell>
-      <s-table-cell>{line.groupName}</s-table-cell>
+      <s-table-cell>{line.profileName}</s-table-cell>
       <s-table-cell>
         {p.catalogs.length === 0 ? (
           <s-badge tone="warning">None</s-badge>

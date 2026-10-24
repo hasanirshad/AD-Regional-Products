@@ -1,6 +1,6 @@
 // Search and filters for the product list. Pure functions, no network.
 
-import type { Filters, Group, Membership, ProductRow } from "./types";
+import type { Filters, Membership, ProductRow } from "./types";
 
 export const NONE = "__none__";
 export const ANY = "__any__";
@@ -12,7 +12,7 @@ export const NO_FILTERS: Filters = {
   productType: "",
   tag: "",
   catalog: "",
-  group: "",
+  profile: "",
 };
 
 export function applyFilters(rows: ProductRow[], f: Filters, membership: Membership): ProductRow[] {
@@ -31,9 +31,9 @@ export function applyFilters(rows: ProductRow[], f: Filters, membership: Members
     if (f.catalog && f.catalog !== NONE && f.catalog !== ANY && !p.catalogs.some((c) => c.id === f.catalog)) {
       return false;
     }
-    const groupId = membership[p.id];
-    if (f.group === NONE && groupId) return false;
-    if (f.group && f.group !== NONE && groupId !== f.group) return false;
+    const profileId = membership[p.id];
+    if (f.profile === NONE && profileId) return false;
+    if (f.profile && f.profile !== NONE && profileId !== f.profile) return false;
     return true;
   });
 }
@@ -61,7 +61,7 @@ export type Chip = { key: keyof Filters; label: string };
 /** One removable chip per active filter (the search text has its own field). */
 export function activeChips(
   f: Filters,
-  lookups: { catalogs: { id: string; title: string }[]; groups: Group[] },
+  lookups: { catalogs: { id: string; title: string }[]; profiles: { id: string; name: string }[] },
 ): Chip[] {
   const chips: Chip[] = [];
   if (f.status) chips.push({ key: "status", label: `Status: ${f.status.toLowerCase()}` });
@@ -77,12 +77,12 @@ export function activeChips(
           : `Catalogue: ${lookups.catalogs.find((c) => c.id === f.catalog)?.title ?? "unknown"}`;
     chips.push({ key: "catalog", label });
   }
-  if (f.group) {
+  if (f.profile) {
     const label =
-      f.group === NONE
-        ? "Not in a group"
-        : `Group: ${lookups.groups.find((g) => g.id === f.group)?.name ?? "unknown"}`;
-    chips.push({ key: "group", label });
+      f.profile === NONE
+        ? "General (no profile)"
+        : `Profile: ${lookups.profiles.find((g) => g.id === f.profile)?.name ?? "unknown"}`;
+    chips.push({ key: "profile", label });
   }
   return chips;
 }

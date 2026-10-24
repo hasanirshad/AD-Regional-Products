@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildOverview, countryMatrix, coverage, focusOf, GENERAL, isPublishedIn, matchFocus, shipsTo } from "./overview";
-import type { Group, Market, ProductRow, ProfileSummary } from "./types";
+import { buildOverview, countryMatrix, coverage, focusOf, GENERAL, isPublishedIn, makeShippers, matchFocus, shipsTo } from "./overview";
+import type { Market, ProductRow, ProfileSummary } from "./types";
 
 const profile = (id: string, countries: string[], extra: Partial<ProfileSummary> = {}): ProfileSummary => ({
   id,
   name: id,
   isDefault: false,
-  variantCount: 0,
+  variantCount: 1,
   locationGroupIds: [],
   zoneIds: [],
   countries,
@@ -38,7 +38,6 @@ const product = (id: string, catalogIds: string[], status = "ACTIVE"): ProductRo
 
 const general = profile("general", ["GB", "DE", "FR", "US"], { isDefault: true, restOfWorld: true });
 const uk = profile("uk", ["GB"]);
-const groups: Group[] = [{ id: "g-uk", name: "UK", countries: ["GB"], profileId: "uk" }];
 const markets = [market("UK", ["GB"], ["c-uk"]), market("DE", ["DE"], ["c-de"]), market("CH", ["CH", "LI"], ["c-ch"])];
 
 describe("shipsTo and coverage", () => {
@@ -60,19 +59,31 @@ describe("shipsTo and coverage", () => {
   });
 });
 
+describe("makeShippers", () => {
+  it("is General first, then every other profile", () => {
+    const s = makeShippers([uk, general, profile("dhl", ["DE"])]);
+    expect(s.map((x) => [x.key, x.kind])).toEqual([
+      [GENERAL, "general"],
+      ["uk", "profile"],
+      ["dhl", "profile"],
+    ]);
+    expect(s[0]?.profile?.isDefault).toBe(true);
+  });
+});
+
 describe("buildOverview", () => {
   const rows = [
-    product("a", ["c-uk"]), // UK group, published in UK: sellable
-    product("b", ["c-de"]), // UK group, published in DE: blocked
+    product("a", ["c-uk"]), // UK profile, published in UK: sellable
+    product("b", ["c-de"]), // UK profile, published in DE: blocked
     product("c", []), // General, no catalogue
     product("d", ["c-de", "c-ch"]), // General: DE sellable, CH sellable (rest of world)
     product("e", [], "DRAFT"), // draft: ignored in counts and issues
   ];
-  const membership = { a: "g-uk", b: "g-uk" };
-  const o = buildOverview({ markets, profiles: [general, uk], groups, rows, membership });
+  const membership = { a: "uk", b: "uk" };
+  const o = buildOverview({ markets, profiles: [general, uk], rows, membership });
 
   it("counts totals over active products", () => {
-    expect(o.totals).toMatchObject({ products: 5, active: 4, inGroups: 2, noCatalogue: 1, groups: 1, markets: 3 });
+    expect(o.totals).toMatchObject({ products: 5, active: 4, inProfiles: 2, noCatalogue: 1, profiles: 1, markets: 3 });
   });
 
   it("gives each product a state per market", () => {
@@ -82,12 +93,13 @@ describe("buildOverview", () => {
     expect(line("d").cells).toMatchObject({ DE: "sellable", CH: "sellable" });
     expect(line("b").hasProblem).toBe(true);
     expect(line("a").hasProblem).toBe(false);
+    expect(line("a")).toMatchObject({ profileName: "uk", kind: "profile" });
   });
 
-  it("summarises per market and per group", () => {
+  it("summarises per market and per profile", () => {
     const de = o.markets.find((m) => m.market.id === "DE")!;
     expect(de.counts).toMatchObject({ sellable: 1, blocked: 1 });
-    const g = o.groups.find((x) => x.key === "g-uk")!;
+    const g = o.profiles.find((x) => x.key === "uk")!;
     expect(g.products).toBe(2);
     expect(g.perMarket.find((p) => p.coverage.market.id === "DE")?.counts.blocked).toBe(1);
   });
@@ -105,40 +117,30 @@ describe("buildOverview", () => {
   });
 });
 
-describe("group issues", () => {
-  const run = (g: Group[], profiles: ProfileSummary[]) =>
-    buildOverview({ markets, profiles, groups: g, rows: [], membership: {} }).issues;
+describe("profile issues", () => {
+  const run = (profiles: ProfileSummary[]) =>
+    buildOverview({ markets, profiles, rows: [], membership: {} }).issues;
 
-  it("flags no profile, a missing profile, no rates and a country mismatch", () => {
-    expect(run([{ id: "g", name: "X", countries: ["GB"], profileId: null }], [general])[0]?.title).toMatch(/no shipping profile/);
-    expect(run([{ id: "g", name: "X", countries: ["GB"], profileId: "gone" }], [general])[0]).toMatchObject({
-      level: "critical",
-    });
-    const noRates = run([{ id: "g", name: "X", countries: ["GB"], profileId: "uk" }], [general, profile("uk", ["GB"], { rateCount: 0 })]);
+  it("flags a profile with products but no rates, and a missing General", () => {
+    const noRates = run([general, profile("uk", ["GB"], { rateCount: 0, variantCount: 3 })]);
     expect(noRates.some((i) => /no active shipping rates/.test(i.title))).toBe(true);
-    const mismatch = run([{ id: "g", name: "X", countries: ["GB", "DE"], profileId: "uk" }], [general, uk]);
-    expect(mismatch.some((i) => /different countries/.test(i.title))).toBe(true);
+    expect(run([general, profile("uk", ["GB"], { rateCount: 0, variantCount: 0 })])).toEqual([]);
+    expect(run([uk]).some((i) => /No General/.test(i.title))).toBe(true);
   });
 
-  it("falls back to General for a group whose profile is gone", () => {
-    const o = buildOverview({
-      markets,
-      profiles: [general],
-      groups: [{ id: "g", name: "X", countries: [], profileId: "gone" }],
-      rows: [product("a", ["c-uk"])],
-      membership: { a: "g" },
-    });
-    expect(o.lines[0]?.groupKey).toBe(GENERAL);
+  it("falls back to General for a membership pointing at a missing profile", () => {
+    const o = buildOverview({ markets, profiles: [general], rows: [product("a", ["c-uk"])], membership: { a: "gone" } });
+    expect(o.lines[0]?.profileKey).toBe(GENERAL);
   });
 });
 
 describe("countryMatrix", () => {
   it("lists each country once with the markets it belongs to and who ships there", () => {
-    const o = buildOverview({ markets, profiles: [general, uk], groups, rows: [], membership: {} });
+    const o = buildOverview({ markets, profiles: [general, uk], rows: [], membership: {} });
     const rows = countryMatrix([...markets, market("EU", ["DE"], [])], o.shippers);
     const de = rows.find((r) => r.code === "DE")!;
     expect(de.markets).toEqual(["DE", "EU"]);
-    expect(de.ships).toEqual({ [GENERAL]: true, "g-uk": false });
+    expect(de.ships).toEqual({ [GENERAL]: true, uk: false });
     expect(rows.filter((r) => r.code === "DE")).toHaveLength(1);
   });
 });
@@ -151,20 +153,20 @@ describe("matchFocus", () => {
     product("d", ["c-de", "c-ch"]),
     product("e", [], "DRAFT"),
   ];
-  const o = buildOverview({ markets, profiles: [general, uk], groups, rows, membership: { a: "g-uk", b: "g-uk" } });
+  const o = buildOverview({ markets, profiles: [general, uk], rows, membership: { a: "uk", b: "uk" } });
   const ids = (f: Partial<Parameters<typeof focusOf>[0]>) =>
     o.lines.filter((l) => matchFocus(l, focusOf(f))).map((l) => l.product.id);
 
-  it("filters by group, market state and active status", () => {
-    expect(ids({ groupKey: "g-uk" })).toEqual(["a", "b"]);
+  it("filters by profile, market state and active status", () => {
+    expect(ids({ profileKey: "uk" })).toEqual(["a", "b"]);
     expect(ids({ marketId: "DE", state: "blocked" })).toEqual(["b"]);
     expect(ids({ marketId: "DE", state: "sellable" })).toEqual(["d"]);
     expect(ids({ marketId: "DE", state: "published" })).toEqual(["b", "d"]);
     expect(ids({ activeOnly: true })).toEqual(["a", "b", "c", "d"]);
   });
-  it("filters by catalogue, group membership and presets", () => {
+  it("filters by catalogue, profile membership and presets", () => {
     expect(ids({ catalogId: "c-de" })).toEqual(["b", "d"]);
-    expect(ids({ inAnyGroup: true })).toEqual(["a", "b"]);
+    expect(ids({ inProfile: true })).toEqual(["a", "b"]);
     expect(ids({ show: "nocat" })).toEqual(["c"]);
     expect(ids({ show: "problem" })).toEqual(["b"]);
     expect(ids({ show: "ok" })).toEqual(["a", "d"]);

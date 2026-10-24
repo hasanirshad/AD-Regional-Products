@@ -1,35 +1,39 @@
 # Regional Products
 
-Invite-only embedded Shopify app for Hardman Design. It will:
+Invite-only embedded Shopify app for Hardman Design. Shipping profiles are the groups: the app reads every profile in the store and helps you check and change where products can be bought.
 
-1. define **groups** (a name plus allowed countries) and keep one shipping profile per group,
-2. let you **filter and pick products** and assign them to a group,
-3. **move products with a review step**: move variants into the group's shipping profile and publish them only in markets where checkout works.
+## What it does
 
-No server, no database. Built to the APPSDAPPS Shopify App Playbook (React Router 7 SPA, Polaris web components, direct API access, Cloudflare Pages).
+1. **Overview** (home, read only): problems to fix, counts, markets, shipping profiles, products by profile and market, checkout by country, catalogues, and every product. Every number opens the matching products.
+2. **Products**: search and filter (status, vendor, type, tag, catalogue, profile), select products across pages, and move them into a shipping profile.
+   Moving is a 3-step flow: choose the profile, review exactly what will change (shipping profile moves, catalogue publishes and unpublishes, per market), then apply after ticking a confirmation.
 
-## Status
+Checkout is blocked by the shipping profile (a product only ships to the countries in its profile's zones). Visibility is the market catalogues: the move can publish where the profile can ship and unpublish where it cannot.
 
-Done so far:
-0. **Overview** (home): problems to fix, counts, markets, groups and profiles, products by group and market, checkout by country, catalogues, and every product. Read-only.
-1. **Groups** page: list, create, edit, preview.
-2. **Products** page: search and filters (status, vendor, type, tag, catalogue, group), selection across pages, and staging moves into a group. Moving products is a 3-step flow: choose a target, review exactly what will change (shipping profile moves, catalogue publishes and unpublishes, per market), then apply after ticking a confirmation. Nothing is written before that.
+## Rules
 
-There is no separate Sync page and no staging: every write goes through the review step.
+- No server, no database, nothing saved by the app. Everything is read live from Shopify.
+- Reads never ask for anything. **Every change asks for the password** (`lib/guard.ts`, SHA-256 of the password in the code). `adminGraphql` refuses any mutation that did not pass the password dialog, so a new write cannot skip it. This is a guard against accidents, not security.
+- The app never creates or edits shipping profiles or their zones and rates. Make them in Shopify under Settings → Shipping.
+- The market named `Global` with handle `de` is hidden on purpose (`lib/hidden.ts`): not listed, not counted, its catalogue ignored.
+- Market catalogue publishing only affects the online store, not draft orders.
 
-- Groups are saved in one app metafield (`$app/groups`). Each group gets a shipping profile named `Group: <name>`, built from the General profile narrowed to the group's countries. Flat rates and weight/price conditions are copied; carrier-calculated rates are listed as "not copied".
-- Saving a group does **not** touch products or markets.
-- Pure logic with tests: `lib/plan.ts`, `lib/parse.ts`, `lib/groups.ts`. Shopify calls: `lib/shopify-data.ts`, `lib/saveGroup.ts`.
+## Where things are
+
+- Pure logic with tests: `lib/overview.ts` (states, issues, filters), `lib/move.ts` (what a move changes), `lib/filter.ts`, `lib/parse.ts`, `lib/guard.ts`.
+- Shopify calls: `lib/shopify-data.ts` (reads), `lib/applyMove.ts` (writes), `lib/admin.ts` (client with retry and the write lock).
 
 ## Run it
 
-1. Node 22 (`.nvmrc`), then `npm install`.
-2. Link the dev app with `npx shopify app config link` (the live config is `shopify.app.regional-products.toml`).
-3. `npm run dev`, choose the dev app and the store `dev-appsdapps`, open the preview link and test **inside the admin**.
+There is one app, `AD Regional Products`, config `shopify.app.production.toml`. No tunnel and no separate dev app.
 
-Before each handoff: `npm test`, `npm run typecheck`, `npm run build`.
+1. Node 22 (`.nvmrc`), then `npm install`.
+2. Before each push: `npm test`, `npm run typecheck`, `npm run build`.
+3. Push to `master`. Cloudflare Pages builds `build/client` (env: `SHOPIFY_API_KEY` = the app's client id, `NODE_VERSION` = 22).
+4. Reload the app inside the store admin. After changing scopes or URLs in the toml, run `npm run deploy`.
 
 ## Notes
 
-- `shopify.app.toml` scopes and `api_version` are a first guess and **unverified**. Check them on `dev-appsdapps`.
-- Nothing is pushed to `master` (the release) without Hasan's go-ahead.
+- Scopes and `api_version` in the toml are a first guess and **unverified**. Check them on the first install.
+- The calls that move variants and publish products (`lib/applyMove.ts`) are unverified on a real store. Test with one or two products first.
+- Nothing is pushed to `master` without Hasan's go-ahead.
