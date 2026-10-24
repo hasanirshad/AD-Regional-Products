@@ -5,7 +5,7 @@
 import { adminGraphql, assertNoUserErrors } from "./admin";
 import {
   parseGeneral,
-  parseMarkets,
+  hiddenCatalogIds, parseMarkets,
   parseProduct,
   parseProfileSummary,
   type RawGeneral,
@@ -24,6 +24,7 @@ const MARKETS = `#graphql
       nodes {
         id
         name
+        handle
         status
         catalogs(first: 10) { nodes { id title publication { id } } }
         conditions {
@@ -133,8 +134,9 @@ export async function loadShop(): Promise<{ name: string; domain: string }> {
   return { name: data.shop.name, domain: data.shop.myshopifyDomain };
 }
 
-export async function loadMarkets(): Promise<Market[]> {
-  return parseMarkets(await adminGraphql<RawMarkets>(MARKETS));
+export async function loadMarkets(): Promise<{ markets: Market[]; hiddenCatalogIds: string[] }> {
+  const raw = await adminGraphql<RawMarkets>(MARKETS);
+  return { markets: parseMarkets(raw), hiddenCatalogIds: hiddenCatalogIds(raw) };
 }
 
 /** Every shipping profile in the store, as light summaries. */

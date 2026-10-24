@@ -13,6 +13,8 @@ import type { Shared } from "./products-state";
 export type AppData = {
   shop: { name: string; domain: string };
   markets: Market[];
+  /** Catalogues of hidden markets. Products' catalogue lists ignore them. */
+  hiddenCatalogIds: string[];
   profiles: ProfileSummary[];
   /** The General profile in full. Null if the store has no default profile. */
   general: GeneralProfile | null;
@@ -25,7 +27,7 @@ export type AppState = AppData & {
 };
 
 async function loadAll(): Promise<AppData> {
-  const [shop, markets, profiles, saved] = await Promise.all([
+  const [shop, marketData, profiles, saved] = await Promise.all([
     loadShop(),
     loadMarkets(),
     loadProfiles(),
@@ -33,7 +35,8 @@ async function loadAll(): Promise<AppData> {
   ]);
   const defaultProfile = profiles.find((p) => p.isDefault);
   const general = defaultProfile ? await loadGeneral(defaultProfile.id) : null;
-  return { shop, markets, profiles, general, groups: parseGroupsFile(saved).groups };
+  const { markets, hiddenCatalogIds } = marketData;
+  return { shop, markets, hiddenCatalogIds, profiles, general, groups: parseGroupsFile(saved).groups };
 }
 
 export type Loaded =

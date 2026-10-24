@@ -21,14 +21,14 @@ export type ProductsLoad = {
   reload: () => void;
 };
 
-export function useProductsLoad(app: Pick<AppState, "groups" | "profiles"> | null): ProductsLoad {
+export function useProductsLoad(app: Pick<AppState, "groups" | "profiles" | "hiddenCatalogIds"> | null): ProductsLoad {
   const [status, setStatus] = useState<ProductsLoad["status"]>("idle");
   const [rows, setRows] = useState<ProductRow[]>([]);
   const [membership, setMembership] = useState<Membership>({});
   const [loaded, setLoaded] = useState(0);
   const [error, setError] = useState("");
   const running = useRef(false);
-  const latest = useRef<{ groups: Group[]; profiles: ProfileSummary[] } | null>(null);
+  const latest = useRef<{ groups: Group[]; profiles: ProfileSummary[]; hiddenCatalogIds: string[] } | null>(null);
   latest.current = app;
 
   const run = useCallback(async () => {
@@ -47,9 +47,10 @@ export function useProductsLoad(app: Pick<AppState, "groups" | "profiles"> | nul
         if (!res.hasNext) break;
         after = res.cursor;
       }
-      const { groups, profiles } = latest.current ?? { groups: [], profiles: [] };
+      const { groups, profiles, hiddenCatalogIds } = latest.current ?? { groups: [], profiles: [], hiddenCatalogIds: [] };
       const m = await loadMembership(groups, profiles);
-      setRows(all);
+      const hidden = new Set(hiddenCatalogIds);
+      setRows(hidden.size === 0 ? all : all.map((p) => ({ ...p, catalogs: p.catalogs.filter((c) => !hidden.has(c.id)) })));
       setMembership(m);
       setStatus("ready");
     } catch (err) {

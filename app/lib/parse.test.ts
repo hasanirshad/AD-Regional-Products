@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseGeneral, parseMarkets, parseProfileSummary, type RawGeneral } from "./parse";
+import { hiddenCatalogIds, parseGeneral, parseMarkets, parseProfileSummary, type RawGeneral } from "./parse";
 
 describe("parseMarkets", () => {
   it("reads countries from region conditions and ignores other region types", () => {
@@ -33,6 +33,22 @@ describe("parseMarkets", () => {
     ]);
     expect(markets[1]?.countries).toEqual([]);
     expect(markets[0]?.catalogs).toEqual([{ id: "cat1", title: "DACH catalogue", publicationId: "pub1" }]);
+  });
+});
+
+describe("hidden markets", () => {
+  const raw = {
+    markets: {
+      nodes: [
+        { id: "m1", name: "Global", handle: "de", status: "ACTIVE", catalogs: { nodes: [{ id: "cat-g", title: "Global" }] }, conditions: null },
+        { id: "m2", name: "Germany", handle: "germany", status: "ACTIVE", catalogs: { nodes: [{ id: "cat-de", title: "Germany" }] }, conditions: null },
+        { id: "m3", name: "Global", handle: "other", status: "ACTIVE", catalogs: { nodes: [] }, conditions: null },
+      ],
+    },
+  };
+  it("drops only the market whose name AND handle match, and reports its catalogues", () => {
+    expect(parseMarkets(raw).map((m) => m.id)).toEqual(["m2", "m3"]);
+    expect(hiddenCatalogIds(raw)).toEqual(["cat-g"]);
   });
 });
 

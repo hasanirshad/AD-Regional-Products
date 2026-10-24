@@ -1,6 +1,7 @@
 // Turns raw Admin API answers into the plain shapes in types.ts.
 // Pure functions: no network, easy to test.
 
+import { isHiddenMarket } from "./hidden";
 import type {
   GeneralProfile,
   ProductRow,
@@ -22,6 +23,7 @@ export type RawMarkets = {
       id: string;
       name: string;
       status: string;
+      handle?: string;
       catalogs: { nodes: { id: string; title: string; publication?: { id: string } | null }[] };
       conditions: {
         regionsCondition: {
@@ -34,8 +36,13 @@ export type RawMarkets = {
   };
 };
 
+/** Catalogue ids of hidden markets, so products' catalogue lists can ignore them. */
+export function hiddenCatalogIds(raw: RawMarkets): string[] {
+  return raw.markets.nodes.filter(isHiddenMarket).flatMap((m) => (m.catalogs?.nodes ?? []).map((c) => c.id));
+}
+
 export function parseMarkets(raw: RawMarkets): Market[] {
-  return raw.markets.nodes.map((m) => ({
+  return raw.markets.nodes.filter((m) => !isHiddenMarket(m)).map((m) => ({
     id: m.id,
     name: m.name,
     status: m.status,
