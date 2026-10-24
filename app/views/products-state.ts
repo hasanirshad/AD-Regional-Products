@@ -4,11 +4,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NO_FILTERS } from "../lib/filter";
-import { loadMembership, loadProductsPage } from "../lib/shopify-data";
+import { loadMembership, loadProductsPage, PRODUCT_QUERY } from "../lib/shopify-data";
 import type { Filters, Membership, ProductRow, ProfileSummary } from "../lib/types";
 import type { AppState } from "./state";
 
+export type ProductScope = "active" | "all";
+
 export type ProductsLoad = {
+  /** active = quick first load (active products only). all = also drafts and archived. */
+  scope: ProductScope;
+  /** Reads the products again with this scope. */
+  setScope: (scope: ProductScope) => void;
   status: "idle" | "loading" | "ready" | "error";
   rows: ProductRow[];
   membership: Membership;
@@ -27,12 +33,18 @@ export function useProductsLoad(app: Pick<AppState, "profiles" | "hiddenCatalogI
   const [membership, setMembership] = useState<Membership>({});
   const [loaded, setLoaded] = useState(0);
   const [error, setError] = useState("");
+  const [scope, setScopeState] = useState<ProductScope>("active");
+  const scopeRef = useRef<ProductScope>("active");
   const running = useRef(false);
   const latest = useRef<{ profiles: ProfileSummary[]; hiddenCatalogIds: string[] } | null>(null);
   latest.current = app;
 
-  const run = useCallback(async () => {
+  const run = useCallback(async (next?: ProductScope) => {
     if (running.current || !latest.current) return;
+    if (next) {
+      scopeRef.current = next;
+      setScopeState(next);
+    }
     running.current = true;
     setStatus("loading");
     setError("");
@@ -41,7 +53,7 @@ export function useProductsLoad(app: Pick<AppState, "profiles" | "hiddenCatalogI
       const all: ProductRow[] = [];
       let after: string | null = null;
       for (let page = 0; page < 400; page++) {
-        const res = await loadProductsPage(after);
+        const res = await loadProductsPage(after, PRODUCT_QUERY[scopeRef.current]);
         all.push(...res.rows);
         setLoaded(all.length);
         if (!res.hasNext) break;
@@ -66,8 +78,18 @@ export function useProductsLoad(app: Pick<AppState, "profiles" | "hiddenCatalogI
   }, [status, run]);
 
   return useMemo(
-    () => ({ status, rows, membership, loaded, error, load, reload: () => void run() }),
-    [status, rows, membership, loaded, error, load, run],
+    () => ({
+      scope,
+      setScope: (next: ProductScope) => void run(next),
+      status,
+      rows,
+      membership,
+      loaded,
+      error,
+      load,
+      reload: () => void run(),
+    }),
+    [scope, status, rows, membership, loaded, error, load, run],
   );
 }
 

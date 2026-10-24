@@ -3,6 +3,7 @@ import { FilterBar } from "../components/FilterBar";
 import { Loading } from "../components/Loading";
 import { MoveReview } from "../components/MoveReview";
 import { PageBody } from "../components/PageBody";
+import { ScopeBanner } from "../components/ScopeBanner";
 import { SelectField } from "../components/SelectField";
 import { onChecked } from "../lib/dom";
 import {
@@ -138,6 +139,7 @@ export default function Products() {
     <s-page heading={heading} inlineSize="large">
       <PageBody>
         <s-stack gap="large-100">
+          <ScopeBanner scope={products.scope} count={products.rows.length} onChange={products.setScope} />
           <s-section heading="Products">
             <s-stack gap="base">
               <FilterBar

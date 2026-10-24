@@ -100,8 +100,8 @@ export async function loadProfiles(): Promise<ProfileSummary[]> {
 // 25 per page with up to 10 catalogues each keeps one request well under
 // Shopify's per-query cost limit.
 const PRODUCTS = `#graphql
-  query Products($after: String) {
-    products(first: 25, after: $after, sortKey: TITLE) {
+  query Products($after: String, $query: String) {
+    products(first: 25, after: $after, sortKey: TITLE, query: $query) {
       pageInfo { hasNextPage endCursor }
       nodes {
         id
@@ -133,15 +133,19 @@ const PROFILE_ITEMS = `#graphql
     }
   }`;
 
+/** Shopify search text for each scope. Active only is the quick first load. */
+export const PRODUCT_QUERY = { active: "status:active", all: null } as const;
+
 export async function loadProductsPage(
   after: string | null,
+  query: string | null = null,
 ): Promise<{ rows: ProductRow[]; hasNext: boolean; cursor: string | null }> {
   const data = await adminGraphql<{
     products: {
       pageInfo: { hasNextPage: boolean; endCursor: string | null };
       nodes: RawProduct[];
     };
-  }>(PRODUCTS, { after });
+  }>(PRODUCTS, { after, query });
   return {
     rows: data.products.nodes.map(parseProduct),
     hasNext: data.products.pageInfo.hasNextPage,

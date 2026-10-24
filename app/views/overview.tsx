@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { FilterBar } from "../components/FilterBar";
 import { Loading } from "../components/Loading";
 import { PageBody } from "../components/PageBody";
+import { ScopeBanner } from "../components/ScopeBanner";
 import { SelectField } from "../components/SelectField";
 import { summarizeCodes } from "../lib/countries";
 import {
@@ -243,6 +244,7 @@ export default function Overview() {
         <PageBody>
           <s-stack gap="large-100">
             {tabs}
+          <ScopeBanner scope={products.scope} count={totals.products} onChange={products.setScope} />
             <s-section heading="Products">
               <s-stack gap="base">
                 <FilterBar
@@ -343,6 +345,7 @@ export default function Overview() {
       <PageBody>
         <s-stack gap="large-100">
           {tabs}
+          <ScopeBanner scope={products.scope} count={totals.products} onChange={products.setScope} />
 
           <s-section heading="Needs attention">
             <s-stack gap="base">
@@ -357,7 +360,7 @@ export default function Overview() {
           </s-section>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
-            <Tile label="Active products" value={totals.active} hint={`${totals.products} in total`} focus={focusOf({ activeOnly: true })} open={open} />
+            <Tile label="Active products" value={totals.active} hint={products.scope === "all" ? `${totals.products} with drafts and archived` : "active products only"} focus={focusOf({ activeOnly: true })} open={open} />
             <Tile label="In a profile" value={totals.inProfiles} hint={`${totals.products - totals.inProfiles} in General`} focus={focusOf({ inProfile: true })} open={open} />
             <Tile label="In no catalogue" value={totals.noCatalogue} hint="active, not sold anywhere" focus={focusOf({ show: "nocat" })} open={open} />
             <Tile label="Shipping profiles" value={totals.profiles} hint="besides General" focus={focusOf({ inProfile: true })} open={open} />
