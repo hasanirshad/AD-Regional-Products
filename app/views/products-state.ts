@@ -1,0 +1,106 @@
+// Product list and the user's working state (filters, selection, staged
+// moves). Lives in the layout so leaving the page and coming back loses
+// nothing. Products load lazily the first time the Products page opens.
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { NO_FILTERS } from "../lib/filter";
+import { loadMembership, loadProductsPage } from "../lib/shopify-data";
+import type { Filters, Group, Membership, ProductRow, ProfileSummary } from "../lib/types";
+import type { AppState } from "./state";
+
+export type ProductsLoad = {
+  status: "idle" | "loading" | "ready" | "error";
+  rows: ProductRow[];
+  membership: Membership;
+  /** Products read so far, for the progress message. */
+  loaded: number;
+  error: string;
+  /** Starts loading once, the first time it is called. A failed load is retried with `reload`. */
+  load: () => void;
+  /** Reads everything again. */
+  reload: () => void;
+};
+
+export function useProductsLoad(app: Pick<AppState, "groups" | "profiles"> | null): ProductsLoad {
+  const [status, setStatus] = useState<ProductsLoad["status"]>("idle");
+  const [rows, setRows] = useState<ProductRow[]>([]);
+  const [membership, setMembership] = useState<Membership>({});
+  const [loaded, setLoaded] = useState(0);
+  const [error, setError] = useState("");
+  const running = useRef(false);
+  const latest = useRef<{ groups: Group[]; profiles: ProfileSummary[] } | null>(null);
+  latest.current = app;
+
+  const run = useCallback(async () => {
+    if (running.current || !latest.current) return;
+    running.current = true;
+    setStatus("loading");
+    setError("");
+    setLoaded(0);
+    try {
+      const all: ProductRow[] = [];
+      let after: string | null = null;
+      for (let page = 0; page < 400; page++) {
+        const res = await loadProductsPage(after);
+        all.push(...res.rows);
+        setLoaded(all.length);
+        if (!res.hasNext) break;
+        after = res.cursor;
+      }
+      const { groups, profiles } = latest.current ?? { groups: [], profiles: [] };
+      const m = await loadMembership(groups, profiles);
+      setRows(all);
+      setMembership(m);
+      setStatus("ready");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setStatus("error");
+    } finally {
+      running.current = false;
+    }
+  }, []);
+
+  const load = useCallback(() => {
+    if (status === "idle") void run();
+  }, [status, run]);
+
+  return useMemo(
+    () => ({ status, rows, membership, loaded, error, load, reload: () => void run() }),
+    [status, rows, membership, loaded, error, load, run],
+  );
+}
+
+export type ProductsUi = {
+  filters: Filters;
+  setFilters: (f: Filters) => void;
+  selected: Set<string>;
+  setSelected: (update: (prev: Set<string>) => Set<string>) => void;
+  page: number;
+  setPage: (n: number) => void;
+};
+
+export function useProductsUi(): ProductsUi {
+  const [filters, setFiltersRaw] = useState<Filters>(NO_FILTERS);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(0);
+
+  // Any filter change goes back to page 1.
+  const setFilters = useCallback((f: Filters) => {
+    setFiltersRaw(f);
+    setPage(0);
+  }, []);
+
+  return useMemo(
+    () => ({ filters, setFilters, selected, setSelected, page, setPage }),
+    [filters, setFilters, selected, page],
+  );
+}
+
+export type Shared = AppState & { products: ProductsLoad; ui: ProductsUi };
+
+// Keep the effect-based starter next to the types it needs.
+export function useStartProducts(products: ProductsLoad) {
+  useEffect(() => {
+    products.load();
+  }, [products.load]); // eslint-disable-line react-hooks/exhaustive-deps
+}
