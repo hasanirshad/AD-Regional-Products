@@ -1,6 +1,6 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 # PRODUCTION app config (for Hardman). Released with `npm run deploy`.
-# The dev app uses shopify.app.regional-products.toml.
+# There is no separate dev app: test by pushing to GitHub and reloading the app in the store admin.
 
 client_id = "aaebd262b3b8b876abf919bcc9d31e36"
 application_url = "https://ad-regional-products.pages.dev"
@@ -8,7 +8,7 @@ embedded = true
 name = "AD Regional Products"
 
 [access_scopes]
-# Same list as the dev app. Keep the two files in step.
+# Keep in step with the scopes the code needs.
 scopes = "read_locations,read_markets,read_products,read_publications,read_shipping,write_publications,write_shipping"
 
 [access.admin]

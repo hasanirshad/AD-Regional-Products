@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "shopify app dev --config regional-products",
+    "dev": "react-router dev",
     "build": "react-router build && node scripts/preload.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
