@@ -2,9 +2,11 @@ import { useMemo, useState, type ReactNode } from "react";
 import { FilterBar } from "../components/FilterBar";
 import { Loading } from "../components/Loading";
 import { PageBody } from "../components/PageBody";
+import { FixReview } from "../components/FixReview";
 import { ScopeBanner } from "../components/ScopeBanner";
 import { SelectField } from "../components/SelectField";
 import { summarizeCodes } from "../lib/countries";
+import { affectedLines, type FixKind, type FixRequest } from "../lib/fix";
 import {
   buildOverview,
   countryMatrix,
@@ -81,8 +83,11 @@ function Tile({
   );
 }
 
-function IssueBanner({ issue, open }: { issue: Issue; open: Open }) {
+type StartFix = (r: FixRequest) => void;
+
+function IssueBanner({ issue, open, startFix, marketName }: { issue: Issue; open: Open; startFix: StartFix; marketName: (id: string) => string }) {
   const focus = issue.focus;
+  const fix = issue.fix;
   return (
     <s-banner tone={ISSUE_TONE[issue.level]} heading={issue.title}>
       <s-paragraph>{issue.detail}</s-paragraph>
@@ -90,6 +95,16 @@ function IssueBanner({ issue, open }: { issue: Issue; open: Open }) {
         <s-button slot="secondary-actions" onClick={() => open(focus)}>
           Show products
         </s-button>
+      ) : null}
+      {fix ? (
+        <>
+          <s-button slot="secondary-actions" onClick={() => startFix({ kind: "unpublish" as FixKind, ...fix })}>
+            {`Unpublish from ${marketName(fix.marketId)}`}
+          </s-button>
+          <s-button slot="secondary-actions" onClick={() => startFix({ kind: "countries" as FixKind, ...fix })}>
+            Add countries to profile
+          </s-button>
+        </>
       ) : null}
     </s-banner>
   );
@@ -136,10 +151,11 @@ function ProfileBadge({ g }: { g: ProfileRow }) {
 }
 
 export default function Overview() {
-  const { shop, markets, profiles, products } = useAppState();
+  const { shop, markets, profiles, products, refresh } = useAppState();
   useStartProducts(products);
 
-  const [tab, setTab] = useState<"overview" | "products">("overview");
+  const [tab, setTab] = useState<"overview" | "products" | "fix">("overview");
+  const [fixRequest, setFixRequest] = useState<FixRequest | null>(null);
   const [focus, setFocus] = useState<Focus>(NO_FOCUS);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
@@ -195,6 +211,12 @@ export default function Overview() {
   const marketName = (id: string) => sellMarkets.find((m) => m.id === id)?.name ?? id;
   const catalogName = (id: string) => overview.catalogs.find((c) => c.id === id)?.title ?? id;
 
+  const startFix: StartFix = (r) => {
+    setFixRequest(r);
+    setTab("fix");
+    window.scrollTo?.({ top: 0 });
+  };
+
   const tabs = (
     <s-stack direction="inline" gap="small-100">
       <s-button variant={tab === "overview" ? "primary" : "secondary"} onClick={() => setTab("overview")}>
@@ -203,8 +225,56 @@ export default function Overview() {
       <s-button variant={tab === "products" ? "primary" : "secondary"} onClick={() => setTab("products")}>
         {`Products (${overview.lines.filter((l) => matchFocus(l, focus)).length})`}
       </s-button>
+      {fixRequest ? (
+        <s-button variant={tab === "fix" ? "primary" : "secondary"} onClick={() => setTab("fix")}>
+          Review fix
+        </s-button>
+      ) : null}
     </s-stack>
   );
+
+  // ---- Review fix tab ----------------------------------------------------
+  if (tab === "fix" && fixRequest) {
+    const target = overview.shippers.find((s) => s.key === fixRequest.profileKey);
+    const market = sellMarkets.find((m) => m.id === fixRequest.marketId);
+    const lines = affectedLines(overview.lines, fixRequest.profileKey, fixRequest.marketId);
+    const leave = () => {
+      setFixRequest(null);
+      setTab("overview");
+    };
+    return (
+      <s-page heading={heading} inlineSize="large">
+        <PageBody>
+          <s-stack gap="large-100">
+            {tabs}
+            {target && market ? (
+              <FixReview
+                request={fixRequest}
+                lines={lines}
+                target={target}
+                shippers={overview.shippers}
+                market={market}
+                markets={markets}
+                membership={products.membership}
+                onBack={leave}
+                onFinished={() => {
+                  leave();
+                  void refresh();
+                  products.reload();
+                }}
+              />
+            ) : (
+              <s-banner tone="warning" heading="This problem no longer exists">
+                <s-button slot="secondary-actions" onClick={leave}>
+                  Back to overview
+                </s-button>
+              </s-banner>
+            )}
+          </s-stack>
+        </PageBody>
+      </s-page>
+    );
+  }
 
   // ---- Products tab ------------------------------------------------------
   if (tab === "products") {
@@ -354,7 +424,7 @@ export default function Overview() {
                   <s-paragraph>Every shipping profile has rates and every published product can be bought where it is published.</s-paragraph>
                 </s-banner>
               ) : (
-                issues.map((i, n) => <IssueBanner key={n} issue={i} open={open} />)
+                issues.map((i, n) => <IssueBanner key={n} issue={i} open={open} startFix={startFix} marketName={marketName} />)
               )}
             </s-stack>
           </s-section>

@@ -9,6 +9,7 @@ const profile = (id: string, countries: string[], extra: Partial<ProfileSummary>
   variantCount: 1,
   locationGroupIds: [],
   zoneIds: [],
+  zones: [],
   countries,
   restOfWorld: false,
   rateCount: 2,

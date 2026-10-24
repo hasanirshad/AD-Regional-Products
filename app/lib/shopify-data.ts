@@ -57,6 +57,7 @@ const PROFILES = `#graphql
             nodes {
               zone {
                 id
+                name
                 countries { code { countryCode restOfWorld } }
               }
             }

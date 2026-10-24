@@ -57,6 +57,7 @@ export type RawProfileSummary = {
       nodes: {
         zone: {
           id: string;
+          name?: string;
           countries?: { code: { countryCode: string | null; restOfWorld: boolean } }[];
         };
       }[];
@@ -81,6 +82,17 @@ export function parseProfileSummary(raw: RawProfileSummary): ProfileSummary {
     variantCount: raw.productVariantsCount?.count ?? 0,
     locationGroupIds: raw.profileLocationGroups.map((g) => g.locationGroup.id),
     zoneIds: zones.map((n) => n.zone.id),
+    zones: raw.profileLocationGroups.flatMap((g) =>
+      g.locationGroupZones.nodes.map((n) => ({
+        id: n.zone.id,
+        name: n.zone.name ?? "Zone",
+        locationGroupId: g.locationGroup.id,
+        countries: (n.zone.countries ?? [])
+          .filter((c) => !c.code.restOfWorld && c.code.countryCode)
+          .map((c) => String(c.code.countryCode).toUpperCase()),
+        restOfWorld: (n.zone.countries ?? []).some((c) => c.code.restOfWorld),
+      })),
+    ),
     countries: [...countries],
     restOfWorld,
     rateCount: raw.activeMethodDefinitionsCount ?? 0,

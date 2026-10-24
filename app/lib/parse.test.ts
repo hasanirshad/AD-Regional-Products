@@ -80,6 +80,10 @@ describe("parseProfileSummary", () => {
       variantCount: 12,
       locationGroupIds: ["lg1"],
       zoneIds: ["z1", "z2"],
+      zones: [
+        { id: "z1", name: "Zone", locationGroupId: "lg1", countries: ["GB"], restOfWorld: false },
+        { id: "z2", name: "Zone", locationGroupId: "lg1", countries: [], restOfWorld: true },
+      ],
       countries: ["GB"],
       restOfWorld: true,
       rateCount: 3,

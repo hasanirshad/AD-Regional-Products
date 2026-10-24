@@ -1,5 +1,14 @@
 // Shared data shapes. Plain objects only, so the logic stays easy to test.
 
+/** One shipping zone of a profile, with the countries it covers. */
+export type ProfileZone = {
+  id: string;
+  name: string;
+  locationGroupId: string;
+  countries: string[];
+  restOfWorld: boolean;
+};
+
 /** Light summary of every shipping profile in the store. */
 export type ProfileSummary = {
   id: string;
@@ -8,6 +17,7 @@ export type ProfileSummary = {
   variantCount: number;
   locationGroupIds: string[];
   zoneIds: string[];
+  zones: ProfileZone[];
   /** Countries the profile ships to, read live (explicit zone countries). */
   countries: string[];
   /** True when a zone covers "Rest of world". */

@@ -4,7 +4,7 @@ import { GENERAL, makeShippers } from "./overview";
 import type { Market, ProductRow, ProfileSummary } from "./types";
 
 const profile = (id: string, countries: string[], extra: Partial<ProfileSummary> = {}): ProfileSummary => ({
-  id, name: id, isDefault: false, variantCount: 0, locationGroupIds: [], zoneIds: [], countries,
+  id, name: id, isDefault: false, variantCount: 0, locationGroupIds: [], zoneIds: [], zones: [], countries,
   restOfWorld: false, rateCount: 2, zonesTruncated: false, ...extra,
 });
 const market = (id: string, codes: string[], cat: string): Market => ({
@@ -87,5 +87,50 @@ describe("edge cases", () => {
     const plan = planMove({ products: [product("a", [])], membership: {}, target: ukProfile, shippers, markets: [m], mode: "full" });
     expect(plan.totals.publish).toBe(0);
     expect(plan.warnings.join(" ")).toMatch(/skipped/);
+  });
+});
+
+describe("fix helpers", () => {
+  const ukOnly = shippers.find((s) => s.key === "uk")!;
+  it("unpublish fix touches only the chosen market", async () => {
+    const { planUnpublishFix } = await import("./fix");
+    const plan = planUnpublishFix({
+      products: [product("a", ["c-uk", "c-de", "c-ch"])],
+      membership: { a: "uk" },
+      target: ukOnly,
+      shippers,
+      markets,
+      marketId: "DE",
+    });
+    expect(plan.lines).toHaveLength(1);
+    expect(plan.lines[0]!.changes.map((c) => c.market.id)).toEqual(["DE"]);
+    expect(plan.totals).toEqual({ shipping: 0, publish: 0, unpublish: 1 });
+  });
+  it("unpublish fix has a blocker when nothing is left", async () => {
+    const { planUnpublishFix } = await import("./fix");
+    const plan = planUnpublishFix({
+      products: [product("a", ["c-uk"])],
+      membership: { a: "uk" },
+      target: ukOnly,
+      shippers,
+      markets,
+      marketId: "DE",
+    });
+    expect(plan.blocker).toMatch(/Nothing to unpublish/);
+  });
+  it("country fix adds only missing countries and keeps the rest", async () => {
+    const { planCountryFix, countryFixInput } = await import("./fix");
+    const zone = { id: "z1", name: "Germany", locationGroupId: "lg1", countries: ["DE"], restOfWorld: false };
+    const fix = planCountryFix({ zones: [zone], zoneId: "z1", market: markets[2]!, shipsAlready: ["DE"] })!;
+    expect(fix.add).toEqual(["CH", "LI"]);
+    expect(fix.after).toEqual(["DE", "CH", "LI"]);
+    const input = countryFixInput(fix);
+    expect(input.locationGroupsToUpdate[0]!.zonesToUpdate[0]!.countries).toHaveLength(3);
+  });
+  it("country fix reports nothing to add", async () => {
+    const { planCountryFix } = await import("./fix");
+    const zone = { id: "z1", name: "z", locationGroupId: "lg1", countries: ["GB"], restOfWorld: false };
+    const fix = planCountryFix({ zones: [zone], zoneId: "z1", market: markets[0]!, shipsAlready: ["GB"] })!;
+    expect(fix.blocker).toMatch(/already ships/);
   });
 });

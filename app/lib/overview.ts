@@ -92,6 +92,8 @@ export type Issue = {
   detail: string;
   /** The products this problem is about. */
   focus?: Focus;
+  /** Set on "cannot be bought" problems: which profile and market the fixes apply to. */
+  fix?: { profileKey: string; marketId: string };
 };
 
 /** What the Products tab is showing. Every field narrows the list. */
@@ -289,6 +291,7 @@ export function buildOverview(input: {
           title: `${pm.counts.blocked} ${gs.name} product${pm.counts.blocked === 1 ? "" : "s"} published in ${pm.coverage.market.name} but cannot be bought there`,
           detail: `${gs.name} ships to none of ${pm.coverage.market.name}'s countries. Unpublish them from that market, or add the countries to the profile in Shopify.`,
           focus: focusOf({ profileKey: gs.key, marketId: pm.coverage.market.id, state: "blocked", activeOnly: true }),
+          fix: { profileKey: gs.key, marketId: pm.coverage.market.id },
         });
       }
     }
