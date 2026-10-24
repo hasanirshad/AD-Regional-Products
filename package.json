@@ -7,11 +7,11 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "shopify app dev",
+    "dev": "shopify app dev --config regional-products",
     "build": "react-router build && node scripts/preload.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "deploy": "shopify app deploy"
+    "deploy": "shopify app deploy --config ad-regional-products"
   },
   "dependencies": {
     "@react-router/node": "^7.18.4",

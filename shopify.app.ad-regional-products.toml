@@ -1,0 +1,25 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+# PRODUCTION app config. Released with `npm run deploy`. The dev app uses shopify.app.regional-products.toml.
+
+client_id = "43514a254b06e516fcc403866234b423"
+application_url = "https://ad-regional-products.pages.dev"
+embedded = true
+name = "AD Regional Products"
+
+[access_scopes]
+# Same list as the dev app. Keep the two files in step.
+scopes = "read_locations,read_markets,read_products,read_publications,read_shipping,write_publications,write_shipping"
+
+[access.admin]
+direct_api_mode = "online"
+embedded_app_direct_api_access = true
+
+[auth]
+redirect_urls = [ "https://ad-regional-products.pages.dev/api/auth" ]
+
+[webhooks]
+# Admin API version used by direct API access. Stable release.
+api_version = "2026-07"
+
+[build]
+include_config_on_deploy = true
