@@ -11,7 +11,7 @@
     "build": "react-router build && node scripts/preload.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "deploy": "shopify app deploy --config ad-regional-products"
+    "deploy": "shopify app deploy --config production"
   },
   "dependencies": {
     "@react-router/node": "^7.18.4",
