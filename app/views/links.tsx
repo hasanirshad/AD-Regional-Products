@@ -4,6 +4,7 @@ import { Loading } from "../components/Loading";
 import { PageBody } from "../components/PageBody";
 import { ScopeBanner } from "../components/ScopeBanner";
 import { SelectField } from "../components/SelectField";
+import { normalizeBase, readOverrides, writeOverrides, type DomainOverrides } from "../lib/domains";
 import { onChecked, onInput } from "../lib/dom";
 import { activeChips, ANY, applyFilters, filterOptions, NO_FILTERS, NONE } from "../lib/filter";
 import { buildLinks, isUsMarket, linksCsv, pickRoot, STAY_PARAM, themeLabel, type MarketRoot, type Theme, type WebPresence } from "../lib/links";
@@ -23,6 +24,7 @@ const SOURCE_TEXT = {
   domain: "Own domain",
   subfolder: "Subfolder",
   primary: "Store primary domain (the market has no web presence)",
+  manual: "Typed in by you",
 } as const;
 
 // Read only. Nothing here changes the store, so there is no password.
@@ -37,6 +39,10 @@ export default function Links() {
   const [themesError, setThemesError] = useState("");
   const [themeChoice, setThemeChoice] = useState(LIVE);
   const [manualId, setManualId] = useState("");
+  const [saved, setSaved] = useState<DomainOverrides>(() => readOverrides());
+  const [drafts, setDrafts] = useState<Record<string, string>>(() => readOverrides());
+  const [draftErrors, setDraftErrors] = useState<Record<string, string>>({});
+  const [saveNote, setSaveNote] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -54,10 +60,35 @@ export default function Links() {
   const sellMarkets = useMemo(() => sellingMarkets(markets), [markets]);
   const marketRoots = useMemo<Record<string, MarketRoot>>(() => {
     const out: Record<string, MarketRoot> = {};
-    if (!roots) return out;
-    for (const m of sellMarkets) out[m.id] = pickRoot(roots.presences[m.id] ?? [], roots.primaryUrl);
+    for (const m of sellMarkets) {
+      const typed = saved[m.id];
+      if (typed) out[m.id] = { root: typed, source: "manual" };
+      else if (roots) out[m.id] = pickRoot(roots.presences[m.id] ?? [], roots.primaryUrl);
+    }
     return out;
-  }, [roots, sellMarkets]);
+  }, [roots, sellMarkets, saved]);
+  // The page works with typed addresses alone, so a failed read does not block it.
+  const rootsReady = roots !== null || rootsError !== "";
+
+  const dirty = sellMarkets.some((m) => (drafts[m.id] ?? "") !== (saved[m.id] ?? ""));
+  const saveDomains = () => {
+    const next: DomainOverrides = {};
+    const errors: Record<string, string> = {};
+    for (const m of sellMarkets) {
+      const r = normalizeBase(drafts[m.id] ?? "");
+      if (!r.ok) errors[m.id] = r.error;
+      else if (r.value) next[m.id] = r.value;
+    }
+    setDraftErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setSaveNote("");
+      return;
+    }
+    const ok = writeOverrides(next);
+    setSaved(next);
+    setDrafts({ ...next });
+    setSaveNote(ok ? "Saved in this browser." : "Used for this visit only: the browser would not save it.");
+  };
 
   // The preview id. "" = the live theme, which needs no parameter.
   const manualOk = /^\d+$/.test(manualId.trim());
@@ -164,31 +195,50 @@ export default function Links() {
               </s-text>
 
               {rootsError ? <s-banner tone="critical" heading="Could not read the market domains">{rootsError}</s-banner> : null}
-              {roots === null && !rootsError ? (
+              {!rootsReady ? (
                 <Loading message="Reading market domains…" />
               ) : (
                 <s-table>
                   <s-table-header-row>
                     <s-table-header>Market</s-table-header>
-                    <s-table-header>Storefront address</s-table-header>
+                    <s-table-header>Base address used</s-table-header>
                     <s-table-header>Source</s-table-header>
-                    <s-table-header>Extra</s-table-header>
+                    <s-table-header>Type the base domain (optional)</s-table-header>
                   </s-table-header-row>
                   <s-table-body>
                     {sellMarkets.map((m) => {
                       const r = marketRoots[m.id];
                       return (
                         <s-table-row key={m.id}>
-                          <s-table-cell>{m.name}</s-table-cell>
+                          <s-table-cell>
+                            {m.name}
+                            {isUsMarket(m) ? <s-badge tone="info">{`${STAY_PARAM.name}=${STAY_PARAM.value}`}</s-badge> : null}
+                          </s-table-cell>
                           <s-table-cell>{r ? r.root : "—"}</s-table-cell>
-                          <s-table-cell>{r ? SOURCE_TEXT[r.source] : "—"}</s-table-cell>
-                          <s-table-cell>{isUsMarket(m) ? <s-badge tone="info">{`${STAY_PARAM.name}=${STAY_PARAM.value}`}</s-badge> : "—"}</s-table-cell>
+                          <s-table-cell>{r ? SOURCE_TEXT[r.source] : "Not found: type it in"}</s-table-cell>
+                          <s-table-cell>
+                            <s-text-field
+                              label={`Base domain for ${m.name}`}
+                              labelAccessibilityVisibility="exclusive"
+                              placeholder="https://hardman.de"
+                              value={drafts[m.id] ?? ""}
+                              error={draftErrors[m.id] || undefined}
+                              ref={onInput((v) => setDrafts((d) => ({ ...d, [m.id]: v })))}
+                            />
+                          </s-table-cell>
                         </s-table-row>
                       );
                     })}
                   </s-table-body>
                 </s-table>
               )}
+              <s-stack direction="inline" gap="base" alignItems="center">
+                <s-button variant="primary" disabled={!dirty || undefined} onClick={saveDomains}>
+                  Save domains
+                </s-button>
+                {saveNote ? <s-text color="subdued">{saveNote}</s-text> : null}
+                {!saveNote ? <s-text color="subdued">An address typed here replaces the one from Shopify. Clear the field and save to go back to Shopify's. Saved in this browser only; nothing is sent anywhere.</s-text> : null}
+              </s-stack>
               <s-text color="subdued">
                 The US link gets {STAY_PARAM.name}={STAY_PARAM.value}, so visitors from outside the US are not redirected away.
               </s-text>
@@ -260,10 +310,10 @@ export default function Links() {
               </s-stack>
 
               <s-stack direction="inline" gap="base" alignItems="center">
-                <s-button variant="primary" disabled={chosen.length === 0 || roots === null || undefined} onClick={() => exportRows(chosen)}>
+                <s-button variant="primary" disabled={chosen.length === 0 || !rootsReady || undefined} onClick={() => exportRows(chosen)}>
                   {`Export ${chosen.length} selected (CSV)`}
                 </s-button>
-                <s-button disabled={filtered.length === 0 || roots === null || undefined} onClick={() => exportRows(filtered)}>
+                <s-button disabled={filtered.length === 0 || !rootsReady || undefined} onClick={() => exportRows(filtered)}>
                   {`Export all ${filtered.length} matching`}
                 </s-button>
                 <s-text color="subdued">One row per product and market: title, market, store link, admin link.</s-text>

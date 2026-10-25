@@ -120,7 +120,7 @@ app/
 scripts/preload.mjs              modulepreload hints (ROUTE_IDS = views/layout, views/overview)
 public/_headers                  frame-ancestors for Shopify + immutable cache for /assets/*
 ```
-184 tests in 19 files (`app/lib/*.test.ts`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
+192 tests in 20 files (`app/lib/*.test.ts`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
 which runs the real `applyMove` / `runPlan` against a fake Shopify (incl. a silent no-op). `testkit.ts` has the builders.
 No UI tests; no test for `shopify-data` queries (they only run inside the admin).
 
@@ -193,7 +193,7 @@ Zones (30 per location group) are flagged (`zonesTruncated`).
 ## Commands
 
 `npm test` (vitest), `npm run typecheck`, `npm run build`, `npm run deploy`. Before any handoff run
-test + typecheck + build. Expected: 184 tests pass, typecheck clean.
+test + typecheck + build. Expected: 192 tests pass, typecheck clean.
 
 ## Channels & catalogues page (added 2026-10-26)
 
@@ -211,8 +211,13 @@ test + typecheck + build. Expected: 184 tests pass, typecheck clean.
 ## Storefront links page (added 2026-10-26)
 
 - Route `/links`, read only (no password). Own selection/filters (`linksUi`). Hidden Global market stays hidden here.
-- Market address: `Market.webPresences { defaultLocale, domain, subfolderSuffix, rootUrls }` (API 2026-07, checked in the docs, not yet seen
+- Market address: `Market.webPresences { domain, subfolderSuffix, rootUrls }` (`defaultLocale` removed: it needs `read_locales`/`read_markets_home` and made the whole read fail; without it the root URL with the shortest path is taken as the default language; a lighter query without `rootUrls` is the fallback) (API 2026-07, checked in the docs, not yet seen
   on the real store). Own domain first, then subfolder, then the store's primary domain (`shop.primaryDomain`). Default-language root URL.
+- **Typed base domains (2026-10-26):** each market row has a "Type the base domain" field + "Save domains". Stored in the browser's
+  localStorage (`ad-regional-products:market-domains`, `lib/domains.ts`), NOT on a server (no-server rule). Per browser/device only; may come
+  back empty in a private window. A typed address replaces the one from Shopify (source "Typed in by you"); clear the field and save to go back.
+  `normalizeBase` adds https, strips trailing slash, allows a subfolder, rejects /products/…, query strings and non-domains. The page works
+  even if the Shopify read fails.
 - Theme: `themes` query needs `read_themes`; on failure the page says so and offers "Another theme: enter its id". Live theme = no parameter;
   any other theme = `?preview_theme_id=<numeric id>`. Unverified: that preview_theme_id works on every market domain.
 - The market that contains the United States gets `stay_us=1` (Hasan: otherwise visitors outside the US are redirected).

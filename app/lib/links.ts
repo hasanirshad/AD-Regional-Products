@@ -18,17 +18,26 @@ export type MarketRoot = {
   /** The storefront address of the market, no trailing slash. */
   root: string;
   /** Where it came from: the market's own domain, a subfolder of another domain, or the store's primary domain (market has no web presence). */
-  source: "domain" | "subfolder" | "primary";
+  source: "domain" | "subfolder" | "primary" | "manual";
 };
 
 const trimSlash = (s: string) => s.replace(/\/+$/, "");
+const pathLength = (url: string) => {
+  try {
+    return trimSlash(new URL(url).pathname).length;
+  } catch {
+    return url.length;
+  }
+};
 
 /** The market's primary address: its own domain first, then a subfolder, then the store's primary domain. */
 export function pickRoot(presences: WebPresence[], primaryUrl: string): MarketRoot {
   const rootOf = (p: WebPresence): string | null => {
-    const hit = p.rootUrls.find((r) => r.locale === p.defaultLocale) ?? p.rootUrls[0];
+    // The default language is the root without a language folder. When the default locale is unknown, the shortest address is it.
+    const hit = (p.defaultLocale && p.rootUrls.find((r) => r.locale === p.defaultLocale)) || [...p.rootUrls].sort((a, b) => pathLength(a.url) - pathLength(b.url))[0];
     if (hit?.url) return trimSlash(hit.url);
     if (p.domain) return `https://${p.domain}`;
+    if (p.subfolder && primaryUrl) return `${trimSlash(primaryUrl)}/${p.subfolder.replace(/^\/+/, "")}`;
     return null;
   };
   for (const p of presences) {

@@ -28,6 +28,13 @@ describe("pickRoot", () => {
   it("uses a subfolder when there is no domain", () => {
     expect(pickRoot([pres({ subfolder: "nl", rootUrls: [{ locale: "en", url: "https://hardman.com/nl" }] })], "https://hardman.com")).toEqual({ root: "https://hardman.com/nl", source: "subfolder" });
   });
+  it("without a known default locale, the address with no language folder is the default", () => {
+    const r = pickRoot([pres({ defaultLocale: "", domain: "hardman.de", rootUrls: [{ locale: "en", url: "https://hardman.de/en" }, { locale: "de", url: "https://hardman.de" }] })], "https://x.com");
+    expect(r.root).toBe("https://hardman.de");
+  });
+  it("builds a subfolder address from the primary domain when root urls are missing", () => {
+    expect(pickRoot([pres({ subfolder: "fr" })], "https://hardman.com")).toEqual({ root: "https://hardman.com/fr", source: "subfolder" });
+  });
   it("falls back to the host when root urls are missing, and to the primary domain when there is no web presence", () => {
     expect(pickRoot([pres({ domain: "hardman.ch" })], "https://x.com").root).toBe("https://hardman.ch");
     expect(pickRoot([], "https://hardman.com/")).toEqual({ root: "https://hardman.com", source: "primary" });

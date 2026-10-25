@@ -384,12 +384,23 @@ const MARKET_ROOTS = `#graphql
         id
         webPresences(first: 10) {
           nodes {
-            defaultLocale { locale }
             domain { host }
             subfolderSuffix
             rootUrls { locale url }
           }
         }
+      }
+    }
+  }`;
+
+// Fallback if rootUrls cannot be read: the domain host and the subfolder are enough to build the address.
+const MARKET_ROOTS_LITE = `#graphql
+  query MarketRootsLite {
+    shop { primaryDomain { url } }
+    markets(first: 100) {
+      nodes {
+        id
+        webPresences(first: 10) { nodes { domain { host } subfolderSuffix } }
       }
     }
   }`;
@@ -401,7 +412,6 @@ type RawMarketRoots = {
       id: string;
       webPresences?: {
         nodes: {
-          defaultLocale?: { locale: string } | null;
           domain?: { host: string } | null;
           subfolderSuffix?: string | null;
           rootUrls?: { locale: string; url: string }[] | null;
@@ -413,13 +423,18 @@ type RawMarketRoots = {
 
 /** The store's primary domain and, per market, its web presences (domain / subfolder). Free to call. */
 export async function loadMarketRoots(): Promise<{ primaryUrl: string; presences: Record<string, WebPresence[]> }> {
-  const raw = await adminGraphql<RawMarketRoots>(MARKET_ROOTS);
+  let raw: RawMarketRoots;
+  try {
+    raw = await adminGraphql<RawMarketRoots>(MARKET_ROOTS);
+  } catch {
+    raw = await adminGraphql<RawMarketRoots>(MARKET_ROOTS_LITE);
+  }
   const presences: Record<string, WebPresence[]> = {};
   for (const m of raw.markets.nodes) {
     presences[m.id] = (m.webPresences?.nodes ?? []).map((p) => ({
       domain: p.domain?.host ?? null,
       subfolder: p.subfolderSuffix ?? null,
-      defaultLocale: p.defaultLocale?.locale ?? "",
+      defaultLocale: "",
       rootUrls: p.rootUrls ?? [],
     }));
   }
