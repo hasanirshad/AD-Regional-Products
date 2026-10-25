@@ -5,7 +5,7 @@ import type { Market, ProductRow, ProfileSummary } from "./types";
 
 const profile = (id: string, countries: string[], extra: Partial<ProfileSummary> = {}): ProfileSummary => ({
   id, name: id, isDefault: false, variantCount: 0, locationGroupIds: [], zoneIds: [], zones: [], countries,
-  restOfWorld: false, rateCount: 2, zonesTruncated: false, ...extra,
+  restOfWorld: false, unratedCountries: [], ratesKnown: true, rateCount: 2, zonesTruncated: false, ...extra,
 });
 const market = (id: string, codes: string[], cat: string): Market => ({
   id, name: id, status: "ACTIVE",
@@ -14,7 +14,7 @@ const market = (id: string, codes: string[], cat: string): Market => ({
 });
 const product = (id: string, cats: string[], status = "ACTIVE"): ProductRow => ({
   id, numericId: id, title: id, handle: id, vendor: "", productType: "", status, tags: [],
-  catalogs: cats.map((c) => ({ id: c, title: c })),
+  catalogs: cats.map((c) => ({ id: c, title: c })), variantCount: 1,
 });
 
 const general = profile("general", [], { isDefault: true, restOfWorld: true });
@@ -120,7 +120,7 @@ describe("fix helpers", () => {
   });
   it("country fix adds only missing countries and keeps the rest", async () => {
     const { planCountryFix, countryFixInput } = await import("./fix");
-    const zone = { id: "z1", name: "Germany", locationGroupId: "lg1", countries: ["DE"], restOfWorld: false };
+    const zone = { id: "z1", name: "Germany", locationGroupId: "lg1", countries: ["DE"], restOfWorld: false, rateCount: 1 };
     const fix = planCountryFix({ zones: [zone], zoneId: "z1", market: markets[2]!, shipsAlready: ["DE"] })!;
     expect(fix.add).toEqual(["CH", "LI"]);
     expect(fix.after).toEqual(["DE", "CH", "LI"]);
@@ -129,7 +129,7 @@ describe("fix helpers", () => {
   });
   it("country fix reports nothing to add", async () => {
     const { planCountryFix } = await import("./fix");
-    const zone = { id: "z1", name: "z", locationGroupId: "lg1", countries: ["GB"], restOfWorld: false };
+    const zone = { id: "z1", name: "z", locationGroupId: "lg1", countries: ["GB"], restOfWorld: false, rateCount: 1 };
     const fix = planCountryFix({ zones: [zone], zoneId: "z1", market: markets[0]!, shipsAlready: ["GB"] })!;
     expect(fix.blocker).toMatch(/already ships/);
   });

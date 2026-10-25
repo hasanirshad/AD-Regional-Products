@@ -6,7 +6,7 @@ import { FixReview } from "../components/FixReview";
 import { ScopeBanner } from "../components/ScopeBanner";
 import { SelectField } from "../components/SelectField";
 import { summarizeCodes } from "../lib/countries";
-import { affectedLines, type FixKind, type FixRequest } from "../lib/fix";
+import { affectedLines, type FixRequest } from "../lib/fix";
 import {
   buildOverview,
   countryMatrix,
@@ -96,14 +96,28 @@ function IssueBanner({ issue, open, startFix, marketName }: { issue: Issue; open
           Show products
         </s-button>
       ) : null}
-      {fix ? (
+      {fix?.kind === "unify" ? (
+        <s-button slot="secondary-actions" onClick={() => startFix({ kind: "unify" })}>
+          Put each in one profile
+        </s-button>
+      ) : fix ? (
         <>
-          <s-button slot="secondary-actions" onClick={() => startFix({ kind: "unpublish" as FixKind, ...fix })}>
-            {`Unpublish from ${marketName(fix.marketId)}`}
-          </s-button>
-          <s-button slot="secondary-actions" onClick={() => startFix({ kind: "countries" as FixKind, ...fix })}>
-            Add countries to profile
-          </s-button>
+          {fix.actions.includes("unpublish") ? (
+            <s-button
+              slot="secondary-actions"
+              onClick={() => startFix({ kind: "unpublish", profileKey: fix.profileKey, marketId: fix.marketId, state: fix.state })}
+            >
+              {`Unpublish from ${marketName(fix.marketId)}`}
+            </s-button>
+          ) : null}
+          {fix.actions.includes("countries") ? (
+            <s-button
+              slot="secondary-actions"
+              onClick={() => startFix({ kind: "countries", profileKey: fix.profileKey, marketId: fix.marketId, state: fix.state })}
+            >
+              Add countries to profile
+            </s-button>
+          ) : null}
         </>
       ) : null}
     </s-banner>
@@ -163,9 +177,9 @@ export default function Overview() {
   const overview = useMemo(
     () =>
       products.status === "ready"
-        ? buildOverview({ markets, profiles, rows: products.rows, membership: products.membership })
+        ? buildOverview({ markets, profiles, rows: products.rows, membership: products.membership, parts: products.parts, notes: products.notes })
         : null,
-    [markets, profiles, products.status, products.rows, products.membership],
+    [markets, profiles, products.status, products.rows, products.membership, products.parts, products.notes],
   );
 
   const heading = `Overview · ${shop.name}`;
@@ -235,9 +249,12 @@ export default function Overview() {
 
   // ---- Review fix tab ----------------------------------------------------
   if (tab === "fix" && fixRequest) {
-    const target = overview.shippers.find((s) => s.key === fixRequest.profileKey);
-    const market = sellMarkets.find((m) => m.id === fixRequest.marketId);
-    const lines = affectedLines(overview.lines, fixRequest.profileKey, fixRequest.marketId);
+    const unify = fixRequest.kind === "unify";
+    const target = unify ? undefined : overview.shippers.find((s) => s.key === fixRequest.profileKey);
+    const market = unify ? undefined : sellMarkets.find((m) => m.id === fixRequest.marketId);
+    const lines = unify
+      ? overview.lines.filter((l) => l.split && l.product.status === "ACTIVE")
+      : affectedLines(overview.lines, fixRequest.profileKey, fixRequest.marketId, fixRequest.state);
     const leave = () => {
       setFixRequest(null);
       setTab("overview");
@@ -247,15 +264,14 @@ export default function Overview() {
         <PageBody>
           <s-stack gap="large-100">
             {tabs}
-            {target && market ? (
+            {unify || (target && market) ? (
               <FixReview
                 request={fixRequest}
                 lines={lines}
-                target={target}
                 shippers={overview.shippers}
-                market={market}
                 markets={markets}
                 membership={products.membership}
+                parts={products.parts}
                 onBack={leave}
                 onFinished={() => {
                   leave();
@@ -293,7 +309,7 @@ export default function Overview() {
       setPage(0);
     };
 
-    const showLabel = { nocat: "In no catalogue", problem: "Cannot be bought somewhere", ok: "No problems" } as const;
+    const showLabel = { nocat: "In no catalogue", problem: "Cannot be bought somewhere", ok: "No problems", split: "Variants in different profiles" } as const;
     const chips = [
       ...(focus.activeOnly ? [{ key: "activeOnly", label: "Active only" }] : []),
       ...(focus.show ? [{ key: "show", label: showLabel[focus.show] }] : []),
@@ -342,6 +358,7 @@ export default function Overview() {
                       { value: "problem", label: "Cannot be bought somewhere" },
                       { value: "nocat", label: "In no catalogue" },
                       { value: "ok", label: "No problems" },
+                      { value: "split", label: "Variants in different profiles" },
                     ]}
                   />
                   <SelectField
@@ -434,6 +451,9 @@ export default function Overview() {
             <Tile label="In a profile" value={totals.inProfiles} hint={`${totals.products - totals.inProfiles} in General`} focus={focusOf({ inProfile: true })} open={open} />
             <Tile label="In no catalogue" value={totals.noCatalogue} hint="active, not sold anywhere" focus={focusOf({ show: "nocat" })} open={open} />
             <Tile label="Shipping profiles" value={totals.profiles} hint="besides General" focus={focusOf({ inProfile: true })} open={open} />
+            {totals.split > 0 ? (
+              <Tile label="Split products" value={totals.split} hint="variants in different profiles" focus={focusOf({ show: "split", activeOnly: true })} open={open} />
+            ) : null}
             <Tile label="Selling markets" value={totals.markets} hint="show published products" focus={focusOf({ state: "published", activeOnly: true })} open={open} />
           </div>
 
@@ -518,6 +538,7 @@ export default function Overview() {
                       <Go n={g.products} focus={focusOf({ profileKey: g.key, activeOnly: true })} open={open} label={`Show ${g.products} active products in ${g.name}`}>
                         {g.products}
                       </Go>
+                      {g.splitProducts > 0 ? <s-text color="subdued">{` + ${g.splitProducts} split`}</s-text> : null}
                     </s-table-cell>
                     <s-table-cell>{g.profile?.variantCount ?? "—"}</s-table-cell>
                   </s-table-row>
@@ -628,7 +649,13 @@ function ProductLineRow({ line, marketIds }: { line: ProductLine; marketIds: str
           </>
         ) : null}
       </s-table-cell>
-      <s-table-cell>{line.profileName}</s-table-cell>
+      <s-table-cell>
+        {line.split ? (
+          <s-badge tone="warning">{`Split: ${line.parts.map((p) => `${p.name}${p.variants > 0 ? ` (${p.variants})` : ""}`).join(" + ")}`}</s-badge>
+        ) : (
+          line.profileName
+        )}
+      </s-table-cell>
       <s-table-cell>
         {p.catalogs.length === 0 ? (
           <s-badge tone="warning">None</s-badge>

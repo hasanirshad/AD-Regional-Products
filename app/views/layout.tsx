@@ -11,10 +11,12 @@ export default function Layout() {
   const app = loaded.status === "ready" ? loaded.state : null;
   const products = useProductsLoad(app);
   const ui = useProductsUi();
+  const channelsUi = useProductsUi();
+  const linksUi = useProductsUi();
 
   const shared = useMemo<Shared | null>(
-    () => (app ? { ...app, products, ui } : null),
-    [app, products, ui],
+    () => (app ? { ...app, products, ui, channelsUi, linksUi } : null),
+    [app, products, ui, channelsUi, linksUi],
   );
 
   return (
@@ -22,6 +24,9 @@ export default function Layout() {
       <s-app-nav>
         <s-link href="/">Overview</s-link>
         <s-link href="/products">Products</s-link>
+        <s-link href="/channels">Channels &amp; catalogues</s-link>
+        <s-link href="/links">Storefront links</s-link>
+        <s-link href="/check">Product check</s-link>
       </s-app-nav>
       <Gate
         status={loaded.status}

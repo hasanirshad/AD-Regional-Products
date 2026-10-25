@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hiddenCatalogIds, parseMarkets, parseProfileSummary } from "./parse";
+import { hiddenCatalogIds, parseHiddenMarkets, parseMarkets, parseProfileSummary } from "./parse";
 
 describe("parseMarkets", () => {
   it("reads countries from region conditions and ignores other region types", () => {
@@ -50,6 +50,11 @@ describe("hidden markets", () => {
     expect(parseMarkets(raw).map((m) => m.id)).toEqual(["m2", "m3"]);
     expect(hiddenCatalogIds(raw)).toEqual(["cat-g"]);
   });
+  it("parseHiddenMarkets returns the hidden market with its catalogue (the Channels page uses it)", () => {
+    const hidden = parseHiddenMarkets(raw);
+    expect(hidden.map((m) => m.id)).toEqual(["m1"]);
+    expect(hidden[0]?.catalogs).toEqual([{ id: "cat-g", title: "Global", publicationId: null }]);
+  });
 });
 
 describe("parseProfileSummary", () => {
@@ -81,11 +86,13 @@ describe("parseProfileSummary", () => {
       locationGroupIds: ["lg1"],
       zoneIds: ["z1", "z2"],
       zones: [
-        { id: "z1", name: "Zone", locationGroupId: "lg1", countries: ["GB"], restOfWorld: false },
-        { id: "z2", name: "Zone", locationGroupId: "lg1", countries: [], restOfWorld: true },
+        { id: "z1", name: "Zone", locationGroupId: "lg1", countries: ["GB"], restOfWorld: false, rateCount: null },
+        { id: "z2", name: "Zone", locationGroupId: "lg1", countries: [], restOfWorld: true, rateCount: null },
       ],
       countries: ["GB"],
       restOfWorld: true,
+      unratedCountries: [],
+      ratesKnown: false,
       rateCount: 3,
       zonesTruncated: false,
     });

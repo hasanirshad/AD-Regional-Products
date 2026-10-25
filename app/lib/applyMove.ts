@@ -8,6 +8,8 @@ import type { MovePlan } from "./move";
 export type Failure = { productId: string; title: string; message: string };
 
 export type MoveResult = {
+  /** Products of the plan that were fully done (not failed, not skipped by Stop). */
+  succeeded: string[];
   shippingMoved: number;
   published: number;
   unpublished: number;
@@ -15,7 +17,7 @@ export type MoveResult = {
   stopped: boolean;
 };
 
-export type Progress = { phase: "shipping" | "catalogues"; done: number; total: number };
+export type Progress = { phase: "shipping" | "catalogues" | "publishing"; done: number; total: number };
 
 const VARIANTS = `#graphql
   query MoveVariants($ids: [ID!]!) {
@@ -39,7 +41,7 @@ const ASSOCIATE = `#graphql
   }
 `;
 
-const PUBLISH = `#graphql
+export const PUBLISH = `#graphql
   mutation MovePublish($id: ID!, $input: [PublicationInput!]!) {
     publishablePublish(id: $id, input: $input) {
       userErrors { field message }
@@ -47,7 +49,7 @@ const PUBLISH = `#graphql
   }
 `;
 
-const UNPUBLISH = `#graphql
+export const UNPUBLISH = `#graphql
   mutation MoveUnpublish($id: ID!, $input: [PublicationInput!]!) {
     publishableUnpublish(id: $id, input: $input) {
       userErrors { field message }
@@ -55,7 +57,12 @@ const UNPUBLISH = `#graphql
   }
 `;
 
-const PRODUCTS_PER_READ = 5;
+/**
+ * Shopify refuses a query whose REQUESTED cost is over 1,000: products x variants(first: 250) must stay under it.
+ * 3 x 250 = 750 plus overhead. (5 x 250 was over the limit.)
+ */
+export const PRODUCTS_PER_READ = 3;
+export const VARIANTS_PER_READ = 250;
 const VARIANTS_PER_WRITE = 100;
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -64,7 +71,7 @@ export async function applyMove(
   plan: MovePlan,
   options: { onProgress: (p: Progress) => void; shouldStop: () => boolean },
 ): Promise<MoveResult> {
-  const result: MoveResult = { shippingMoved: 0, published: 0, unpublished: 0, failures: [], stopped: false };
+  const result: MoveResult = { succeeded: [], shippingMoved: 0, published: 0, unpublished: 0, failures: [], stopped: false };
   const profileId = plan.target.profile?.id;
   if (!profileId) throw new Error("The target has no shipping profile.");
 
@@ -139,8 +146,13 @@ export async function applyMove(
   await flush();
   result.shippingMoved = [...moved].filter((id) => !failed.has(id)).length;
 
+  // A product goes on to the catalogues only when its shipping part is done (or it has none).
+  const shippingOk = (l: (typeof plan.lines)[number]) =>
+    !failed.has(l.product.id) && (!l.shippingChange || moved.has(l.product.id));
+  const finished = new Set<string>(plan.lines.filter((l) => l.changes.length === 0 && shippingOk(l)).map((l) => l.product.id));
+
   // ---- 2. Catalogues ----------------------------------------------------
-  const withChanges = plan.lines.filter((l) => l.changes.length > 0 && !failed.has(l.product.id));
+  const withChanges = plan.lines.filter((l) => l.changes.length > 0 && shippingOk(l));
   done = 0;
   options.onProgress({ phase: "catalogues", done, total: withChanges.length });
 
@@ -170,11 +182,13 @@ export async function applyMove(
         assertNoUserErrors(d.publishableUnpublish.userErrors, "Unpublishing");
         result.unpublished += unpublish.length;
       }
+      finished.add(line.product.id);
     } catch (err) {
       fail(line.product.id, line.product.title, message(err));
     }
     done++;
     options.onProgress({ phase: "catalogues", done, total: withChanges.length });
   }
+  result.succeeded = [...finished].filter((id) => !failed.has(id));
   return result;
 }

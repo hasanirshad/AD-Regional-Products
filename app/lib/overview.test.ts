@@ -12,6 +12,8 @@ const profile = (id: string, countries: string[], extra: Partial<ProfileSummary>
   zones: [],
   countries,
   restOfWorld: false,
+  unratedCountries: [],
+  ratesKnown: true,
   rateCount: 2,
   zonesTruncated: false,
   ...extra,
@@ -35,6 +37,7 @@ const product = (id: string, catalogIds: string[], status = "ACTIVE"): ProductRo
   status,
   tags: [],
   catalogs: catalogIds.map((c) => ({ id: c, title: c })),
+  variantCount: 1,
 });
 
 const general = profile("general", ["GB", "DE", "FR", "US"], { isDefault: true, restOfWorld: true });

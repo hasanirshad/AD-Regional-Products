@@ -13,6 +13,7 @@ const row = (id: string, over: Partial<ProductRow> = {}): ProductRow => ({
   status: "ACTIVE",
   tags: [],
   catalogs: [],
+  variantCount: 1,
   ...over,
 });
 

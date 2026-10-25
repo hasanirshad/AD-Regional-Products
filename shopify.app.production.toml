@@ -9,7 +9,7 @@ name = "AD Regional Products"
 
 [access_scopes]
 # Keep in step with the scopes the code needs.
-scopes = "read_locations,read_markets,read_products,read_publications,read_shipping,write_publications,write_shipping"
+scopes = "read_locations,read_markets,read_products,read_publications,read_shipping,read_themes,write_publications,write_shipping"
 
 [access.admin]
 direct_api_mode = "online"
@@ -23,3 +23,4 @@ redirect_urls = [ "https://ad-regional-products.pages.dev/api/auth" ]
 api_version = "2026-07"
 
 [build]
+include_config_on_deploy = true

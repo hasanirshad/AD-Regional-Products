@@ -13,6 +13,8 @@ export type AppData = {
   markets: Market[];
   /** Catalogues of hidden markets. Products' catalogue lists ignore them. */
   hiddenCatalogIds: string[];
+  /** The hidden markets (Global). Only the Channels page shows them. */
+  hiddenMarkets: Market[];
   profiles: ProfileSummary[];
 };
 
@@ -23,8 +25,8 @@ export type AppState = AppData & {
 
 async function loadAll(): Promise<AppData> {
   const [shop, marketData, profiles] = await Promise.all([loadShop(), loadMarkets(), loadProfiles()]);
-  const { markets, hiddenCatalogIds } = marketData;
-  return { shop, markets, hiddenCatalogIds, profiles };
+  const { markets, hiddenCatalogIds, hiddenMarkets } = marketData;
+  return { shop, markets, hiddenCatalogIds, hiddenMarkets, profiles };
 }
 
 export type Loaded =

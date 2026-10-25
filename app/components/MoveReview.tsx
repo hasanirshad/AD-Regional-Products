@@ -1,15 +1,12 @@
-import { useMemo, useRef, useState } from "react";
-import { applyMove, type MoveResult, type Progress } from "../lib/applyMove";
+import { useMemo, useState } from "react";
 import { summarizeCodes } from "../lib/countries";
-import { onChecked } from "../lib/dom";
 import { planMove, type VisibilityMode } from "../lib/move";
+import { moveEngine } from "../lib/runPlan";
 import type { Shipper } from "../lib/overview";
-import type { Market, Membership, ProductRow } from "../lib/types";
-import { Loading } from "./Loading";
-import { useGuard } from "./PasswordGate";
+import type { Market, Membership, Parts, ProductRow } from "../lib/types";
+import { RunFlow } from "./RunFlow";
 import { SelectField } from "./SelectField";
 
-type Step = "review" | "applying" | "done";
 
 const MODE_LABEL: Record<VisibilityMode, string> = {
   full: "Publish where it can be bought, unpublish where it cannot",
@@ -24,6 +21,7 @@ const SHOWN = 50;
 export function MoveReview({
   products,
   membership,
+  parts,
   target,
   shippers,
   markets,
@@ -32,6 +30,7 @@ export function MoveReview({
 }: {
   products: ProductRow[];
   membership: Membership;
+  parts?: Parts;
   target: Shipper;
   shippers: Shipper[];
   markets: Market[];
@@ -40,103 +39,26 @@ export function MoveReview({
   onFinished: () => void;
 }) {
   const [mode, setMode] = useState<VisibilityMode>("full");
-  const [confirmed, setConfirmed] = useState(false);
-  const [step, setStep] = useState<Step>("review");
-  const [progress, setProgress] = useState<Progress | null>(null);
-  const [result, setResult] = useState<MoveResult | null>(null);
-  const [crash, setCrash] = useState("");
-  const stop = useRef(false);
-  const guard = useGuard();
 
   const plan = useMemo(
-    () => planMove({ products, membership, target, shippers, markets, mode }),
-    [products, membership, target, shippers, markets, mode],
+    () => planMove({ products, membership, parts, target, shippers, markets, mode }),
+    [products, membership, parts, target, shippers, markets, mode],
   );
 
-  const run = async () => {
-    stop.current = false;
-    setStep("applying");
-    setCrash("");
-    try {
-      const r = await applyMove(plan, { onProgress: setProgress, shouldStop: () => stop.current });
-      setResult(r);
-    } catch (err) {
-      setCrash(err instanceof Error ? err.message : String(err));
-    }
-    setStep("done");
-  };
-
-  if (step === "applying") {
-    return (
-      <s-section heading="Step 3 of 3 · Applying">
-        <s-stack gap="base">
-          <Loading
-            message={
-              progress
-                ? `${progress.phase === "shipping" ? "Moving shipping profiles" : "Updating catalogues"}… ${progress.done} of ${progress.total}`
-                : "Starting…"
-            }
-          />
-          <s-text color="subdued">Keep this page open. Changes already made stay if you stop.</s-text>
-          <div>
-            <s-button onClick={() => (stop.current = true)}>Stop</s-button>
-          </div>
-        </s-stack>
-      </s-section>
-    );
-  }
-
-  if (step === "done") {
-    const failures = result?.failures ?? [];
-    return (
-      <s-section heading="Step 3 of 3 · Result">
-        <s-stack gap="base">
-          {crash ? (
-            <s-banner tone="critical" heading="The move stopped with an error">
-              <s-paragraph>{crash}</s-paragraph>
-              <s-paragraph>Some changes may already be applied. Check the Overview.</s-paragraph>
-            </s-banner>
-          ) : result ? (
-            <s-banner
-              tone={failures.length > 0 || result.stopped ? "warning" : "success"}
-              heading={result.stopped ? "Stopped before finishing" : failures.length > 0 ? "Finished with problems" : "Done"}
-            >
-              <s-paragraph>
-                {`${result.shippingMoved} product${result.shippingMoved === 1 ? "" : "s"} moved to ${target.name}. ${result.published} catalogue publish${result.published === 1 ? "" : "es"}, ${result.unpublished} unpublish${result.unpublished === 1 ? "" : "es"}.`}
-              </s-paragraph>
-            </s-banner>
-          ) : null}
-          {failures.length > 0 ? (
-            <s-table>
-              <s-table-header-row>
-                <s-table-header>Product</s-table-header>
-                <s-table-header>What went wrong</s-table-header>
-              </s-table-header-row>
-              <s-table-body>
-                {failures.map((f) => (
-                  <s-table-row key={f.productId}>
-                    <s-table-cell>{f.title}</s-table-cell>
-                    <s-table-cell>{f.message}</s-table-cell>
-                  </s-table-row>
-                ))}
-              </s-table-body>
-            </s-table>
-          ) : null}
-          <div>
-            <s-button variant="primary" onClick={onFinished}>
-              Back to products
-            </s-button>
-          </div>
-        </s-stack>
-      </s-section>
-    );
-  }
-
+  const engine = useMemo(() => moveEngine(plan), [plan]);
   const shown = plan.lines.slice(0, SHOWN);
 
   return (
-    <s-stack gap="large-100">
-      {guard.modal}
+    <RunFlow
+      key={mode}
+      engine={engine}
+      action={`Move to ${target.name}`}
+      applyLabel="Apply changes"
+      blocker={plan.blocker}
+      onBack={onBack}
+      onFinished={onFinished}
+      finishLabel="Back to products"
+    >
       <s-section heading="Step 2 of 3 · Review. Nothing has changed yet.">
         <s-stack gap="base">
           <s-paragraph>
@@ -146,10 +68,7 @@ export function MoveReview({
           <SelectField
             label="Catalogues"
             value={mode}
-            onChange={(v) => {
-              setMode(v as VisibilityMode);
-              setConfirmed(false);
-            }}
+            onChange={(v) => setMode(v as VisibilityMode)}
             options={(Object.keys(MODE_LABEL) as VisibilityMode[]).map((m) => ({ value: m, label: MODE_LABEL[m] }))}
           />
 
@@ -251,29 +170,6 @@ export function MoveReview({
         )}
       </s-section>
 
-      <s-section heading="Apply">
-        <s-stack gap="base">
-          <s-checkbox
-            label="I have reviewed this. It changes the live store."
-            checked={confirmed || undefined}
-            disabled={plan.blocker ? true : undefined}
-            ref={onChecked(setConfirmed)}
-          />
-          <s-stack direction="inline" gap="base">
-            <s-button onClick={onBack}>Back</s-button>
-            <s-button
-              variant="primary"
-              disabled={!confirmed || plan.blocker ? true : undefined}
-              onClick={() => guard.ask(run)}
-            >
-              Apply changes
-            </s-button>
-          </s-stack>
-          {plan.blocker ? null : !confirmed ? (
-            <s-text color="subdued">Tick the box to enable Apply.</s-text>
-          ) : null}
-        </s-stack>
-      </s-section>
-    </s-stack>
+    </RunFlow>
   );
 }

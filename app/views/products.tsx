@@ -49,6 +49,11 @@ export default function Products() {
   const pageAllSelected = pageRows.length > 0 && pageRows.every((p) => selected.has(p.id));
 
   const profileName = (id: string | undefined) => shippers.find((s) => s.key === id)?.name;
+  const profileLabel = (productId: string) => {
+    const list = products.parts[productId];
+    if (list && list.length > 1) return `Split: ${list.map((x) => profileName(x.key) ?? "?").join(" + ")}`;
+    return profileName(products.membership[productId]);
+  };
   // Every shipping profile besides General can hold products.
   const profileChoices = shippers.filter((s) => s.kind === "profile");
 
@@ -118,6 +123,7 @@ export default function Products() {
           <MoveReview
             products={products.rows.filter((p) => selected.has(p.id))}
             membership={products.membership}
+            parts={products.parts}
             target={targetShipper}
             shippers={shippers}
             markets={markets}
@@ -271,6 +277,7 @@ export default function Products() {
                     <s-table-header>Status</s-table-header>
                     <s-table-header>Catalogues</s-table-header>
                     <s-table-header>Profile</s-table-header>
+                    <s-table-header>Details</s-table-header>
                   </s-table-header-row>
                   <s-table-body>
                     {pageRows.map((p) => (
@@ -279,7 +286,7 @@ export default function Products() {
                         p={p}
                         checked={selected.has(p.id)}
                         onCheck={(on) => toggleOne(p.id, on)}
-                        current={profileName(products.membership[p.id])}
+                        current={profileLabel(p.id)}
                       />
                     ))}
                   </s-table-body>
@@ -358,6 +365,9 @@ function ProductTableRow({
       </s-table-cell>
       <s-table-cell>
         {current ?? "—"}
+      </s-table-cell>
+      <s-table-cell>
+        <s-link href={`/check?product=${p.numericId}`}>Check</s-link>
       </s-table-cell>
     </s-table-row>
   );

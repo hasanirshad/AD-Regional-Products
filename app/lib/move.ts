@@ -1,15 +1,15 @@
 // What moving products into a shipping profile (or back to General) would change.
 // Pure planning, used for the review step. Nothing here writes to Shopify.
 
+import { isSplit, partsOf } from "./parts";
 import {
   coverage,
-  GENERAL,
   isPublishedIn,
   sellingMarkets,
   type Coverage,
   type Shipper,
 } from "./overview";
-import type { Market, MarketCatalog, Membership, ProductRow } from "./types";
+import type { Market, MarketCatalog, Membership, Part, Parts, ProductRow } from "./types";
 
 /**
  * full: publish where the profile ships, unpublish where it ships nowhere.
@@ -23,6 +23,8 @@ export type CatalogChange = { market: Market; catalog: MarketCatalog; kind: "pub
 export type MoveLine = {
   product: ProductRow;
   from: string;
+  /** Where its variants are now (more than one entry = split across profiles). */
+  fromParts: Part[];
   to: string;
   shippingChange: boolean;
   changes: CatalogChange[];
@@ -51,11 +53,17 @@ export function planMove(input: {
   shippers: Shipper[];
   markets: Market[];
   mode: VisibilityMode;
+  /** Where each product's variants are. Without it each product is whole, in its `membership` profile. */
+  parts?: Parts;
 }): MovePlan {
   const { products, membership, target, shippers, mode } = input;
   const markets = sellingMarkets(input.markets);
   const covs = markets.map((m) => coverage(target.profile, m));
   const nameOf = (key: string) => shippers.find((s) => s.key === key)?.name ?? "unknown profile";
+  const labelOf = (list: Part[]) =>
+    isSplit(list)
+      ? `split: ${list.map((p) => `${nameOf(p.key)}${p.variants > 0 ? ` (${p.variants})` : ""}`).join(" + ")}`
+      : nameOf(list[0]?.key ?? "");
   const warnings: string[] = [];
 
   const lines: MoveLine[] = [];
@@ -63,8 +71,9 @@ export function planMove(input: {
   let missingPublication = false;
 
   for (const product of products) {
-    const currentKey = membership[product.id] ?? GENERAL;
-    const shippingChange = currentKey !== target.key;
+    const fromParts = partsOf(product.id, membership, input.parts);
+    // Already in the target only when ALL its variants are there.
+    const shippingChange = isSplit(fromParts) || fromParts[0]?.key !== target.key;
     const changes: CatalogChange[] = [];
 
     if (mode !== "none" && product.status === "ACTIVE") {
@@ -83,7 +92,7 @@ export function planMove(input: {
     }
 
     if (!shippingChange && changes.length === 0) unchanged.push(product);
-    else lines.push({ product, from: nameOf(currentKey), to: target.name, shippingChange, changes });
+    else lines.push({ product, from: labelOf(fromParts), fromParts, to: target.name, shippingChange, changes });
   }
 
   const perMarket: MarketEffect[] = markets.map((m, i) => ({
@@ -107,6 +116,10 @@ export function planMove(input: {
   const drafts = products.filter((p) => p.status !== "ACTIVE").length;
   if (mode !== "none" && drafts > 0) {
     warnings.push(`${drafts} selected product${drafts === 1 ? " is" : "s are"} not active. Their shipping profile moves, but their catalogues are left alone.`);
+  }
+  const splits = lines.filter((l) => isSplit(l.fromParts)).length;
+  if (splits > 0) {
+    warnings.push(`${splits} product${splits === 1 ? " has" : "s have"} variants in different profiles. All their variants move into "${target.name}".`);
   }
   if (missingPublication) {
     warnings.push("Some catalogues could not be read for publishing and will be skipped.");
