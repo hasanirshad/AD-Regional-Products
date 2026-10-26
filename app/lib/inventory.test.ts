@@ -254,15 +254,30 @@ describe("summarizeStock", () => {
         ],
       },
     });
-    expect(s).toMatchObject({ variants: 2, complete: true, tracked: 1, stops: 1 });
+    expect(s).toMatchObject({ variants: 2, complete: true, tracked: 1, stops: 1, soldOut: 0 });
     expect(s.locations).toEqual([
       { id: "l2", name: "Berlin", available: 2, variants: 1 },
       { id: "l1", name: "London", available: 20, variants: 2 },
     ]);
   });
+  it("counts a tracked variant that stops at 0 and has nothing left anywhere as sold out", () => {
+    const mk = (policy: string, tracked: boolean, qs: number[]) => ({
+      inventoryPolicy: policy,
+      inventoryItem: { tracked, inventoryLevels: { nodes: qs.map((q, i) => level(`l${i}`, `L${i}`, q)) } },
+    });
+    const s = summarizeStock({
+      id: "p",
+      variants: {
+        pageInfo: { hasNextPage: false },
+        nodes: [mk("DENY", true, [0, 0]), mk("DENY", true, [0, 2]), mk("CONTINUE", true, [0]), mk("DENY", false, [0]), mk("DENY", true, [])],
+      },
+    });
+    // 1st: sold out. 2nd: has 2. 3rd: keeps selling. 4th: not tracked. 5th: tracked, stops, stocked nowhere = sold out.
+    expect(s.soldOut).toBe(2);
+  });
   it("copes with a variant that has no inventory item and says when variants were cut off", () => {
     const s = summarizeStock({ id: "p", variants: { pageInfo: { hasNextPage: true }, nodes: [{ inventoryPolicy: "DENY", inventoryItem: null }] } });
-    expect(s).toMatchObject({ variants: 1, complete: false, tracked: 0, stops: 1, locations: [] });
+    expect(s).toMatchObject({ variants: 1, complete: false, tracked: 0, stops: 1, soldOut: 0, locations: [] });
   });
 });
 

@@ -193,6 +193,8 @@ export type StockSummary = {
   tracked: number;
   /** Variants that stop selling at 0 (policy DENY). */
   stops: number;
+  /** Variants nobody can buy now: tracked, stop selling at 0, and nothing available at any location. */
+  soldOut: number;
   /** Every location where at least one variant is stocked, with the available total over the variants stocked there. */
   locations: { id: string; name: string; available: number; variants: number }[];
 };
@@ -239,16 +241,20 @@ export function summarizeStock(raw: NonNullable<RawOverview>): StockSummary {
   const byLocation = new Map<string, StockSummary["locations"][number]>();
   let tracked = 0;
   let stops = 0;
+  let soldOut = 0;
   for (const v of raw.variants.nodes) {
     if (v.inventoryItem?.tracked) tracked++;
     if (v.inventoryPolicy === "DENY") stops++;
+    let total = 0;
     for (const level of v.inventoryItem?.inventoryLevels?.nodes ?? []) {
       const q = level.quantities.find((x) => x.name === "available")?.quantity ?? 0;
+      total += q;
       const cur = byLocation.get(level.location.id) ?? { id: level.location.id, name: level.location.name, available: 0, variants: 0 };
       cur.available += q;
       cur.variants++;
       byLocation.set(level.location.id, cur);
     }
+    if (v.inventoryItem?.tracked && v.inventoryPolicy === "DENY" && total <= 0) soldOut++;
   }
   return {
     id: raw.id,
@@ -256,6 +262,7 @@ export function summarizeStock(raw: NonNullable<RawOverview>): StockSummary {
     complete: !raw.variants.pageInfo.hasNextPage,
     tracked,
     stops,
+    soldOut,
     locations: [...byLocation.values()].sort((a, b) => a.name.localeCompare(b.name)),
   };
 }

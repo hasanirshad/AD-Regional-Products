@@ -120,7 +120,7 @@ app/
 scripts/preload.mjs              modulepreload hints (ROUTE_IDS = views/layout, views/overview)
 public/_headers                  frame-ancestors for Shopify + immutable cache for /assets/*
 ```
-217 tests in 21 files (`app/lib/*.test.ts`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
+218 tests in 21 files (`app/lib/*.test.ts`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
 which runs the real `applyMove` / `runPlan` against a fake Shopify (incl. a silent no-op). `testkit.ts` has the builders.
 No UI tests; no test for `shopify-data` queries (they only run inside the admin).
 
@@ -193,7 +193,7 @@ Zones (30 per location group) are flagged (`zonesTruncated`).
 ## Commands
 
 `npm test` (vitest), `npm run typecheck`, `npm run build`, `npm run deploy`. Before any handoff run
-test + typecheck + build. Expected: 217 tests pass, typecheck clean.
+test + typecheck + build. Expected: 218 tests pass, typecheck clean.
 
 ## Channels & catalogues page (added 2026-10-26)
 
@@ -217,6 +217,11 @@ test + typecheck + build. Expected: 217 tests pass, typecheck clean.
 - Product list (Step 1) shows, per product, read only: **Tracked** (all / none / n of N), **When sold out** (Stops at 0 / Keeps selling / n of N),
   and **Stock by location** (every location where a variant is stocked, available total, "(n of N variants)" when partial). Read for the products on
   the current page only (2 per call, first 40 variants, 8 locations: `readStockOverview`, `summarizeStock`), cached until "Refresh stock" or after a write.
+- Also per row: the product title links to the product in Shopify admin, and an **Availability** column (Available / Sold out / n of N sold out;
+  sold out = tracked, stops at 0, nothing available at any location: `StockSummary.soldOut`).
+- **Speed** (quick filter changes froze the tab): `FilterBar` keeps typing in its own box and filters 250 ms after the last key (all pages);
+  rows are a memoised `StockRow` with a stable toggle; 25 rows per page; the stock read for a page starts 400 ms after the filters rest
+  and is cancelled if they change again.
 - Calls: `productVariantsBulkUpdate` (tracked + policy, one per product, 250 variants max per call) then `inventorySetQuantities`
   (name `available`, reason `correction`, `changeFromQuantity: null` because API 2026-04+ has no `ignoreCompareQuantity`). Tracking goes first.
 - **Only these locations** (switch): after tracking and quantities, every variant is taken OUT of all locations that are not ticked

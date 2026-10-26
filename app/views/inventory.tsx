@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { FilterBar } from "../components/FilterBar";
 import { InventoryReview } from "../components/InventoryReview";
 import { Loading } from "../components/Loading";
@@ -8,11 +8,14 @@ import { SelectField } from "../components/SelectField";
 import { onChecked, onInput } from "../lib/dom";
 import { activeChips, ANY, applyFilters, filterOptions, NO_FILTERS, NONE } from "../lib/filter";
 import { loadStockLocations, planStock, readStock, readStockOverview, settingsProblem, type StockLocation, type StockPlan, type StockSettings, type StockSummary } from "../lib/inventory";
-import type { Filters } from "../lib/types";
+import type { Filters, ProductRow } from "../lib/types";
 import { useStartProducts } from "./products-state";
 import { useAppState } from "./state";
 
-const PAGE_SIZE = 40;
+/** Kept small: every row is several web components, and the stock of each product is read from Shopify. */
+const PAGE_SIZE = 25;
+/** The stock of a page is read only after the filters have rested this long (quick filter changes read nothing). */
+const READ_PAUSE_MS = 400;
 /** Reviewing reads every selected product once, so the number is capped. */
 const MAX_SELECTED = 500;
 const STATUS_LABEL: Record<string, string> = { ACTIVE: "Active", DRAFT: "Draft", ARCHIVED: "Archived" };
@@ -75,20 +78,23 @@ export default function Inventory() {
     let cancelled = false;
     setOverviewBusy(true);
     setOverviewError("");
-    void (async () => {
-      try {
-        for (let i = 0; i < missing.length && !cancelled; i += 2) {
-          const part = await readStockOverview(missing.slice(i, i + 2));
-          if (!cancelled) setOverview((prev) => ({ ...prev, ...part }));
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          for (let i = 0; i < missing.length && !cancelled; i += 2) {
+            const part = await readStockOverview(missing.slice(i, i + 2));
+            if (!cancelled) setOverview((prev) => ({ ...prev, ...part }));
+          }
+        } catch (err) {
+          if (!cancelled) setOverviewError(err instanceof Error ? err.message : String(err));
+        } finally {
+          if (!cancelled) setOverviewBusy(false);
         }
-      } catch (err) {
-        if (!cancelled) setOverviewError(err instanceof Error ? err.message : String(err));
-      } finally {
-        if (!cancelled) setOverviewBusy(false);
-      }
-    })();
+      })();
+    }, READ_PAUSE_MS);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageKey, overviewNonce]);
@@ -111,13 +117,16 @@ export default function Inventory() {
   };
   const problem = settingsProblem(settings);
 
-  const toggleOne = (id: string, on: boolean) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(id);
-      else next.delete(id);
-      return next;
-    });
+  const toggleOne = useCallback(
+    (id: string, on: boolean) =>
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (on) next.add(id);
+        else next.delete(id);
+        return next;
+      }),
+    [setSelected],
+  );
   const togglePage = (on: boolean) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -314,28 +323,14 @@ export default function Inventory() {
                     <s-table-header>Product</s-table-header>
                     <s-table-header>Status</s-table-header>
                     <s-table-header>Variants</s-table-header>
+                    <s-table-header>Availability</s-table-header>
                     <s-table-header>Tracked</s-table-header>
                     <s-table-header>When sold out</s-table-header>
                     <s-table-header>Stock by location</s-table-header>
                   </s-table-header-row>
                   <s-table-body>
                     {pageRows.map((p) => (
-                      <s-table-row key={p.id}>
-                        <s-table-cell>
-                          <s-checkbox
-                            label={`Select ${p.title}`}
-                            labelAccessibilityVisibility="exclusive"
-                            checked={selected.has(p.id) || undefined}
-                            ref={onChecked((on) => toggleOne(p.id, on))}
-                          />
-                        </s-table-cell>
-                        <s-table-cell>{p.title}</s-table-cell>
-                        <s-table-cell>
-                          <s-badge tone={p.status === "ACTIVE" ? "success" : "neutral"}>{STATUS_LABEL[p.status] ?? p.status}</s-badge>
-                        </s-table-cell>
-                        <s-table-cell>{p.variantCount > 0 ? p.variantCount : "—"}</s-table-cell>
-                        <StockCells summary={overview[p.id]} busy={overviewBusy} />
-                      </s-table-row>
+                      <StockRow key={p.id} p={p} checked={selected.has(p.id)} summary={overview[p.id]} busy={overviewBusy} onToggle={toggleOne} />
                     ))}
                   </s-table-body>
                 </s-table>
@@ -435,12 +430,46 @@ export default function Inventory() {
   );
 }
 
+// One product row. Memoised: it is redrawn only when its own data changes, not on every keystroke or filter change.
+const StockRow = memo(function StockRow({
+  p,
+  checked,
+  summary,
+  busy,
+  onToggle,
+}: {
+  p: ProductRow;
+  checked: boolean;
+  summary: StockSummary | undefined;
+  busy: boolean;
+  onToggle: (id: string, on: boolean) => void;
+}) {
+  return (
+    <s-table-row>
+      <s-table-cell>
+        <s-checkbox label={`Select ${p.title}`} labelAccessibilityVisibility="exclusive" checked={checked || undefined} ref={onChecked((on) => onToggle(p.id, on))} />
+      </s-table-cell>
+      <s-table-cell>
+        <s-link href={`shopify://admin/products/${p.numericId}`} target="_blank">
+          {p.title}
+        </s-link>
+      </s-table-cell>
+      <s-table-cell>
+        <s-badge tone={p.status === "ACTIVE" ? "success" : "neutral"}>{STATUS_LABEL[p.status] ?? p.status}</s-badge>
+      </s-table-cell>
+      <s-table-cell>{p.variantCount > 0 ? p.variantCount : "—"}</s-table-cell>
+      <StockCells summary={summary} busy={busy} />
+    </s-table-row>
+  );
+});
+
 // Three cells next to each product: tracked, what happens at 0, and the stock at every location it is stocked at.
 function StockCells({ summary, busy }: { summary: StockSummary | undefined; busy: boolean }) {
   if (!summary) {
     const text = busy ? "…" : "—";
     return (
       <>
+        <s-table-cell>{text}</s-table-cell>
         <s-table-cell>{text}</s-table-cell>
         <s-table-cell>{text}</s-table-cell>
         <s-table-cell>{text}</s-table-cell>
@@ -451,8 +480,18 @@ function StockCells({ summary, busy }: { summary: StockSummary | undefined; busy
   const some = (count: number) => (count === n ? "all" : count === 0 ? "none" : "some");
   const tracked = some(summary.tracked);
   const stops = some(summary.stops);
+  const sold = summary.soldOut;
   return (
     <>
+      <s-table-cell>
+        {sold === 0 ? (
+          <s-badge tone="success">Available</s-badge>
+        ) : sold === n ? (
+          <s-badge tone="critical">Sold out</s-badge>
+        ) : (
+          <s-badge tone="warning">{`${sold} of ${n} sold out`}</s-badge>
+        )}
+      </s-table-cell>
       <s-table-cell>
         <s-badge tone={tracked === "all" ? "success" : tracked === "none" ? "critical" : "warning"}>
           {tracked === "all" ? "Tracked" : tracked === "none" ? "Not tracked" : `${summary.tracked} of ${n} tracked`}
