@@ -24,6 +24,7 @@ export function InventoryReview({ plan, onBack, onFinished }: { plan: StockPlan;
           <s-stack gap="small-200">
             {s.track ? <Rule tone="success" label="Track quantity" text="Turned on for every variant." /> : null}
             {s.stopAtZero ? <Rule tone="success" label="Sold out = not available" text="Customers cannot buy a variant once its stock reaches 0." /> : null}
+            {s.onlyHere ? <Rule tone="warning" label="Only these locations" text={`Every other location is removed; kept: ${s.locations.map((l) => l.name).join(", ")}.`} /> : null}
             {s.setQuantity ? <Rule tone="info" label={`Quantity ${s.quantity}`} text={`Set at ${s.locations.map((l) => l.name).join(", ")}, for every variant.`} /> : null}
           </s-stack>
           {plan.blocker ? <s-banner tone="critical" heading={plan.blocker} /> : null}
@@ -35,6 +36,7 @@ export function InventoryReview({ plan, onBack, onFinished }: { plan: StockPlan;
             <Stat label="Variants to track" value={plan.totals.track} />
             <Stat label="Variants set to stop at 0" value={plan.totals.policy} />
             <Stat label="Stock levels to set" value={plan.totals.quantity} />
+            {s.onlyHere ? <Stat label="Locations to remove" value={plan.totals.remove} /> : null}
             <Stat label="Already as chosen" value={plan.unchanged.length} />
             <Stat label="Left out" value={plan.skipped.length} />
           </div>
@@ -94,7 +96,7 @@ export function InventoryReview({ plan, onBack, onFinished }: { plan: StockPlan;
   );
 }
 
-function Rule({ tone, label, text }: { tone: "success" | "info"; label: string; text: string }) {
+function Rule({ tone, label, text }: { tone: "success" | "info" | "warning"; label: string; text: string }) {
   return (
     <s-stack direction="inline" gap="small-200" alignItems="center">
       <s-badge tone={tone}>{label}</s-badge>

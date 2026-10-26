@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type V = { id: string; title: string; item: string; tracked: boolean; policy: string; qty: Record<string, number | null> };
+const NAMES: Record<string, string> = { loc1: "Warehouse", loc2: "New York", loc3: "Berlin" };
 const store: { products: Record<string, V[]>; ignore: boolean; failFor: string | null; calls: string[]; many: Set<string> } = {
   products: {},
   ignore: false,
@@ -24,7 +25,7 @@ vi.mock("./admin", async (orig) => {
               id,
               status: "ACTIVE",
               variants: {
-                pageInfo: { hasNextPage: store.many.has(id) && vars.first < 250 },
+                pageInfo: { hasNextPage: store.many.has(id) && vars.first < 50 },
                 nodes: vs.map((v) => ({
                   id: v.id,
                   title: v.title,
@@ -33,12 +34,16 @@ vi.mock("./admin", async (orig) => {
                   inventoryItem: {
                     id: v.item,
                     tracked: v.tracked,
-                    ...Object.fromEntries(
-                      [0, 1, 2].filter((i) => vars[`loc${i}`]).map((i) => {
-                        const q = v.qty[vars[`loc${i}`]];
-                        return [`l${i}`, q === null || q === undefined ? null : { quantities: [{ name: "available", quantity: q }] }];
-                      }),
-                    ),
+                    inventoryLevels: {
+                      pageInfo: { hasNextPage: false },
+                      nodes: Object.entries(v.qty)
+                        .filter(([, q]) => q !== null && q !== undefined)
+                        .map(([loc, q]) => ({
+                          id: `lvl-${v.item}-${loc}`,
+                          location: { id: loc, name: NAMES[loc] ?? loc },
+                          quantities: [{ name: "available", quantity: q as number }],
+                        })),
+                    },
                   },
                 })),
               },
@@ -67,23 +72,31 @@ vi.mock("./admin", async (orig) => {
         }
         return { inventorySetQuantities: { userErrors: [] } };
       }
+      if (query.includes("inventoryDeactivate")) {
+        store.calls.push(`deactivate:${vars.id}`);
+        if (store.failFor === "deactivate") return { inventoryDeactivate: { userErrors: [{ message: "has committed stock" }] } };
+        if (!store.ignore) {
+          for (const list of Object.values(store.products)) for (const v of list) for (const loc of Object.keys(v.qty)) if (vars.id === `lvl-${v.item}-${loc}`) v.qty[loc] = null;
+        }
+        return { inventoryDeactivate: { userErrors: [] } };
+      }
       throw new Error(`unexpected query: ${query.slice(0, 60)}`);
     }),
   };
 });
 
-import { findStockDrift, findStockMismatch, planStock, readStock, recheckStock, runStock, settingsProblem, stockEngine, stockQuery, summarizeStock, type StockSettings } from "./inventory";
+import { findStockDrift, findStockMismatch, planStock, readStock, recheckStock, runStock, settingsProblem, stockEngine, summarizeStock, type StockSettings } from "./inventory";
 import { product } from "./testkit";
 
 const LOC1 = { id: "loc1", name: "Warehouse" };
 const LOC2 = { id: "loc2", name: "New York" };
-const settings: StockSettings = { track: true, stopAtZero: true, setQuantity: true, quantity: 1, locations: [LOC1] };
+const settings: StockSettings = { track: true, stopAtZero: true, setQuantity: true, quantity: 1, locations: [LOC1], onlyHere: false };
 const both: StockSettings = { ...settings, locations: [LOC1, LOC2] };
 const hooks = { onProgress: () => {}, shouldStop: () => false, retryWaitMs: 0 };
 const v = (id: string, over: Partial<V> = {}): V => ({ id: `v${id}`, title: `Var ${id}`, item: `i${id}`, tracked: false, policy: "CONTINUE", qty: { loc1: 0, loc2: 0 }, ...over });
 
 async function plan(ids: string[], s: StockSettings = settings) {
-  return planStock({ products: ids.map((id) => product(id)), states: await readStock(ids, s.locations.map((l) => l.id)), settings: s });
+  return planStock({ products: ids.map((id) => product(id)), states: await readStock(ids), settings: s });
 }
 
 beforeEach(() => {
@@ -153,7 +166,7 @@ describe("drift and mismatch", () => {
   });
   it("mismatch lists what Shopify did not take", async () => {
     const p = await plan(["p1"]);
-    const state = await readStock(["p1"], ["loc1"]);
+    const state = await readStock(["p1"]);
     const m = findStockMismatch(p.lines, settings, state);
     expect(m.map((x) => x.message).join(" ")).toMatch(/not tracked/);
     expect(findStockDrift(p.lines, state)).toEqual([]);
@@ -171,8 +184,8 @@ describe("runStock", () => {
     expect(store.calls[1]).toMatch(/^qty:/);
     expect(store.products.p1![0]).toMatchObject({ tracked: true, policy: "DENY", qty: { loc1: 1 } });
     expect(store.products.p2![0]).toMatchObject({ tracked: true, policy: "DENY", qty: { loc1: 1, loc2: 2 } });
-    expect(rows[1]!.before).toBe("tracked 0/1 · stops at 0: 0/1 · stock: Warehouse 5");
-    expect(rows[1]!.after).toBe("tracked 1/1 · stops at 0: 1/1 · stock: Warehouse 1");
+    expect(rows[1]!.before).toBe("tracked 0/1 · stops at 0: 0/1 · stock: New York 2 | Warehouse 5");
+    expect(rows[1]!.after).toBe("tracked 1/1 · stops at 0: 1/1 · stock: New York 2 | Warehouse 1");
   });
   it("reports a failure on one product and carries on", async () => {
     store.failFor = "p1";
@@ -204,13 +217,6 @@ describe("runStock", () => {
 });
 
 describe("several locations", () => {
-  it("builds one aliased level per location", () => {
-    const q = stockQuery(2);
-    expect(q).toContain("$loc0: ID!");
-    expect(q).toContain("$loc1: ID!");
-    expect(q).toContain("l1: inventoryLevel(locationId: $loc1)");
-    expect(stockQuery(0)).not.toContain("inventoryLevel");
-  });
   it("sets the quantity at every ticked location and leaves the others alone", async () => {
     store.products.p1![0]!.qty = { loc1: 4, loc2: 1 };
     store.products.p2![0]!.qty = { loc1: 5, loc2: 2 };
@@ -257,5 +263,67 @@ describe("summarizeStock", () => {
   it("copes with a variant that has no inventory item and says when variants were cut off", () => {
     const s = summarizeStock({ id: "p", variants: { pageInfo: { hasNextPage: true }, nodes: [{ inventoryPolicy: "DENY", inventoryItem: null }] } });
     expect(s).toMatchObject({ variants: 1, complete: false, tracked: 0, stops: 1, locations: [] });
+  });
+});
+
+describe("only these locations", () => {
+  const only: StockSettings = { track: false, stopAtZero: false, setQuantity: false, quantity: 1, locations: [LOC1], onlyHere: true };
+  beforeEach(() => {
+    store.products = {
+      p1: [v("1", { tracked: true, policy: "DENY", qty: { loc1: 1, loc2: 0, loc3: 0 } }), v("2", { tracked: true, policy: "DENY", qty: { loc1: 1, loc2: 3, loc3: null } })],
+      p2: [v("3", { tracked: true, policy: "DENY", qty: { loc1: null, loc2: 2, loc3: 0 } })],
+      p3: [v("4", { tracked: true, policy: "DENY", qty: { loc1: 1, loc2: null, loc3: null } })],
+    };
+  });
+  it("needs a ticked location", () => {
+    expect(settingsProblem({ ...only, locations: [] })).toMatch(/location/);
+    expect(settingsProblem(only)).toBeNull();
+  });
+  it("plans to drop every other location, but not from a variant that is not stocked at the ticked one", async () => {
+    const p = await plan(["p1", "p2", "p3"], only);
+    expect(p.lines.map((l) => l.product.id)).toEqual(["p1"]);
+    expect(p.lines[0]!.changes.map((c) => c.remove.map((r) => r.locationId))).toEqual([["loc2", "loc3"], ["loc2"]]);
+    expect(p.unchanged.map((x) => x.id)).toEqual(["p2", "p3"]);
+    expect(p.totals).toMatchObject({ remove: 3, removedStock: 1, keptAll: 1 });
+    expect(p.warnings.join(" ")).toMatch(/still hold stock/);
+    expect(p.warnings.join(" ")).toMatch(/must stay stocked somewhere/);
+  });
+  it("removes the other locations, keeps the ticked one, and reads back", async () => {
+    const p = await plan(["p1"], only);
+    const { rows } = await runStock(only, p.lines, hooks);
+    expect(rows[0]!.status).toBe("done");
+    expect(store.products.p1![0]!.qty).toEqual({ loc1: 1, loc2: null, loc3: null });
+    expect(store.products.p1![1]!.qty).toEqual({ loc1: 1, loc2: null, loc3: null });
+    expect(rows[0]!.after).toBe("tracked 2/2 · stops at 0: 2/2 · stock: Warehouse 1, 1");
+    expect(rows[0]!.added.join(" ")).toMatch(/Remove other locations: 3/);
+  });
+  it("sets the quantity first, then removes", async () => {
+    const s = { ...only, setQuantity: true, quantity: 2 };
+    const p = await plan(["p1"], s);
+    await runStock(s, p.lines, hooks);
+    const iQty = store.calls.findIndex((c) => c.startsWith("qty:"));
+    const iDeact = store.calls.findIndex((c) => c.startsWith("deactivate:"));
+    expect(iQty).toBeGreaterThan(-1);
+    expect(iDeact).toBeGreaterThan(iQty);
+    expect(store.products.p1![0]!.qty).toEqual({ loc1: 2, loc2: null, loc3: null });
+  });
+  it("shows a failure when Shopify refuses to remove a location", async () => {
+    store.failFor = "deactivate";
+    const p = await plan(["p1"], only);
+    const { rows } = await runStock(only, p.lines, hooks);
+    expect(rows[0]!.status).toBe("failed");
+    expect(rows[0]!.message).toMatch(/committed/);
+  });
+  it("says 'not verified' when the location is still there", async () => {
+    store.ignore = true;
+    const p = await plan(["p1"], only);
+    const { rows } = await runStock(only, p.lines, hooks);
+    expect(rows[0]!.status).toBe("not verified");
+    expect(rows[0]!.message).toMatch(/still stocked at/);
+  });
+  it("spots a stock level added after the review", async () => {
+    const p = await plan(["p1"], only);
+    store.products.p1![0]!.qty.loc3 = null;
+    expect((await recheckStock(p.lines, only))[0]!.message).toMatch(/changed since the review/);
   });
 });

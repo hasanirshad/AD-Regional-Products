@@ -31,6 +31,7 @@ export default function Inventory() {
   const [track, setTrack] = useState(true);
   const [stopAtZero, setStopAtZero] = useState(true);
   const [setQuantity, setSetQuantity] = useState(true);
+  const [onlyHere, setOnlyHere] = useState(false);
   const [qtyText, setQtyText] = useState("1");
   const [locationIds, setLocationIds] = useState<Set<string>>(new Set());
   const [stage, setStage] = useState<Stage>("choose");
@@ -104,6 +105,7 @@ export default function Inventory() {
     track,
     stopAtZero,
     setQuantity,
+    onlyHere,
     quantity: /^\d+$/.test(qtyText.trim()) ? Number(qtyText.trim()) : Number.NaN,
     locations: (locations ?? []).filter((l) => locationIds.has(l.id)),
   };
@@ -131,8 +133,7 @@ export default function Inventory() {
     setStage("reading");
     try {
       const chosen = rows.filter((p) => selected.has(p.id));
-      const readAt = settings.locations.map((l) => l.id);
-      const states = await readStock(chosen.map((p) => p.id), readAt);
+      const states = await readStock(chosen.map((p) => p.id));
       setPlan(planStock({ products: chosen, states, settings }));
       setStage("review");
     } catch (err) {
@@ -370,13 +371,21 @@ export default function Inventory() {
               />
               <s-checkbox label="Set the quantity" checked={setQuantity || undefined} ref={onChecked(setSetQuantity)} />
               {setQuantity ? (
+                <s-text-field
+                  label="Quantity for every variant"
+                  value={qtyText}
+                  error={Number.isNaN(settings.quantity) ? "Whole number, 0 or more." : undefined}
+                  ref={onInput(setQtyText)}
+                />
+              ) : null}
+              <s-checkbox
+                label="Only these locations"
+                details="Takes every variant out of all the locations that are not ticked below, so it stays stocked only at the ticked ones."
+                checked={onlyHere || undefined}
+                ref={onChecked(setOnlyHere)}
+              />
+              {setQuantity || onlyHere ? (
                 <s-stack gap="base">
-                  <s-text-field
-                    label="Quantity for every variant"
-                    value={qtyText}
-                    error={Number.isNaN(settings.quantity) ? "Whole number, 0 or more." : undefined}
-                    ref={onInput(setQtyText)}
-                  />
                   {locations === null && !locationError ? (
                     <Loading message="Reading locations…" />
                   ) : locationError ? (
@@ -403,7 +412,12 @@ export default function Inventory() {
                       ))}
                     </s-stack>
                   )}
-                  <s-text color="subdued">This replaces the current stock at each ticked location, also when it is higher. Locations you leave unticked are not touched.</s-text>
+                  <s-text color="subdued">
+                    {setQuantity ? "The quantity replaces the current stock at each ticked location, also when it is higher. " : ""}
+                    {onlyHere
+                      ? "Locations that are not ticked are removed from the variants (a variant not stocked at a ticked location keeps its others). Stock held at a removed location is lost."
+                      : "Locations that are not ticked are not touched."}
+                  </s-text>
                 </s-stack>
               ) : null}
               {tooMany ? <s-banner tone="critical" heading={`Select ${MAX_SELECTED} products or fewer at a time (you have ${selected.size}).`} /> : null}
