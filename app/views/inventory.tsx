@@ -7,7 +7,7 @@ import { ScopeBanner } from "../components/ScopeBanner";
 import { SelectField } from "../components/SelectField";
 import { onChecked, onInput } from "../lib/dom";
 import { activeChips, ANY, applyFilters, filterOptions, NO_FILTERS, NONE } from "../lib/filter";
-import { loadStockLocations, planStock, readStock, settingsProblem, type StockLocation, type StockPlan, type StockSettings } from "../lib/inventory";
+import { loadStockLocations, planStock, readStock, readStockOverview, settingsProblem, type StockLocation, type StockPlan, type StockSettings, type StockSummary } from "../lib/inventory";
 import type { Filters } from "../lib/types";
 import { useStartProducts } from "./products-state";
 import { useAppState } from "./state";
@@ -51,6 +51,12 @@ export default function Inventory() {
     };
   }, []);
 
+  // Current stock picture of the products on this page (read only, cached while you stay on the page).
+  const [overview, setOverview] = useState<Record<string, StockSummary>>({});
+  const [overviewBusy, setOverviewBusy] = useState(false);
+  const [overviewError, setOverviewError] = useState("");
+  const [overviewNonce, setOverviewNonce] = useState(0);
+
   const rows = products.rows;
   const options = useMemo(() => filterOptions(rows), [rows]);
   const filtered = useMemo(() => applyFilters(rows, filters, {}), [rows, filters]);
@@ -58,6 +64,38 @@ export default function Inventory() {
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pages - 1);
   const pageRows = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+  const pageKey = pageRows.map((p) => p.id).join(",");
+  useEffect(() => {
+    const missing = pageKey.split(",").filter((id) => id && !(id in overview));
+    if (missing.length === 0) {
+      setOverviewBusy(false);
+      return;
+    }
+    let cancelled = false;
+    setOverviewBusy(true);
+    setOverviewError("");
+    void (async () => {
+      try {
+        for (let i = 0; i < missing.length && !cancelled; i += 2) {
+          const part = await readStockOverview(missing.slice(i, i + 2));
+          if (!cancelled) setOverview((prev) => ({ ...prev, ...part }));
+        }
+      } catch (err) {
+        if (!cancelled) setOverviewError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (!cancelled) setOverviewBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageKey, overviewNonce]);
+  const refreshStock = () => {
+    setOverview({});
+    setOverviewNonce((n) => n + 1);
+  };
+
   const pageAllSelected = pageRows.length > 0 && pageRows.every((p) => selected.has(p.id));
   const chips = activeChips(filters, { catalogs: options.catalogs, profiles: [] });
   const set = (patch: Partial<Filters>) => setFilters({ ...filters, ...patch });
@@ -155,6 +193,7 @@ export default function Inventory() {
               setStage("choose");
               setPlan(null);
               setSelected(() => new Set());
+              refreshStock();
               void refresh();
               products.reload();
             }}
@@ -238,7 +277,20 @@ export default function Inventory() {
                 <s-button variant="tertiary" onClick={products.reload}>
                   Refresh products
                 </s-button>
+                <s-button variant="tertiary" onClick={refreshStock}>
+                  Refresh stock
+                </s-button>
+                {overviewBusy ? <s-text color="subdued">Reading stock for this page…</s-text> : null}
               </s-stack>
+
+              {overviewError ? (
+                <s-banner tone="warning" heading="Could not read the stock of some products">
+                  <s-paragraph>{overviewError}</s-paragraph>
+                  <s-button slot="secondary-actions" onClick={() => setOverviewNonce((n) => n + 1)}>
+                    Try again
+                  </s-button>
+                </s-banner>
+              ) : null}
 
               {filtered.length === 0 ? (
                 <s-stack gap="small-100">
@@ -261,6 +313,9 @@ export default function Inventory() {
                     <s-table-header>Product</s-table-header>
                     <s-table-header>Status</s-table-header>
                     <s-table-header>Variants</s-table-header>
+                    <s-table-header>Tracked</s-table-header>
+                    <s-table-header>When sold out</s-table-header>
+                    <s-table-header>Stock by location</s-table-header>
                   </s-table-header-row>
                   <s-table-body>
                     {pageRows.map((p) => (
@@ -278,6 +333,7 @@ export default function Inventory() {
                           <s-badge tone={p.status === "ACTIVE" ? "success" : "neutral"}>{STATUS_LABEL[p.status] ?? p.status}</s-badge>
                         </s-table-cell>
                         <s-table-cell>{p.variantCount > 0 ? p.variantCount : "—"}</s-table-cell>
+                        <StockCells summary={overview[p.id]} busy={overviewBusy} />
                       </s-table-row>
                     ))}
                   </s-table-body>
@@ -362,5 +418,52 @@ export default function Inventory() {
         </s-stack>
       </PageBody>
     </s-page>
+  );
+}
+
+// Three cells next to each product: tracked, what happens at 0, and the stock at every location it is stocked at.
+function StockCells({ summary, busy }: { summary: StockSummary | undefined; busy: boolean }) {
+  if (!summary) {
+    const text = busy ? "…" : "—";
+    return (
+      <>
+        <s-table-cell>{text}</s-table-cell>
+        <s-table-cell>{text}</s-table-cell>
+        <s-table-cell>{text}</s-table-cell>
+      </>
+    );
+  }
+  const n = summary.variants;
+  const some = (count: number) => (count === n ? "all" : count === 0 ? "none" : "some");
+  const tracked = some(summary.tracked);
+  const stops = some(summary.stops);
+  return (
+    <>
+      <s-table-cell>
+        <s-badge tone={tracked === "all" ? "success" : tracked === "none" ? "critical" : "warning"}>
+          {tracked === "all" ? "Tracked" : tracked === "none" ? "Not tracked" : `${summary.tracked} of ${n} tracked`}
+        </s-badge>
+      </s-table-cell>
+      <s-table-cell>
+        <s-badge tone={stops === "all" ? "success" : stops === "none" ? "warning" : "warning"}>
+          {stops === "all" ? "Stops at 0" : stops === "none" ? "Keeps selling" : `${summary.stops} of ${n} stop at 0`}
+        </s-badge>
+      </s-table-cell>
+      <s-table-cell>
+        {summary.locations.length === 0 ? (
+          <s-text color="subdued">Not stocked anywhere</s-text>
+        ) : (
+          <s-stack gap="small-300">
+            {summary.locations.map((l) => (
+              <s-text key={l.id}>
+                {`${l.name}: ${l.available}`}
+                {l.variants < n ? <s-text color="subdued">{` (${l.variants} of ${n} variants)`}</s-text> : null}
+              </s-text>
+            ))}
+          </s-stack>
+        )}
+        {!summary.complete ? <s-text color="subdued">First 40 variants only</s-text> : null}
+      </s-table-cell>
+    </>
   );
 }

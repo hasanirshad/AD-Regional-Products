@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
+import { FilterBar } from "../components/FilterBar";
 import { Loading } from "../components/Loading";
 import { PageBody } from "../components/PageBody";
+import { SelectField } from "../components/SelectField";
 import { summarizeCodes } from "../lib/countries";
 import { buildProductCheck, type ProductCheck, type ProductDetail, type Result } from "../lib/check";
-import { onInput } from "../lib/dom";
+import { activeChips, ANY, applyFilters, filterOptions, NO_FILTERS, NONE } from "../lib/filter";
 import { loadProductDetail } from "../lib/shopify-data";
-import type { ProductRow } from "../lib/types";
+import type { Filters } from "../lib/types";
 import { useStartProducts } from "./products-state";
 import { useAppState } from "./state";
 
-const MAX_MATCHES = 8;
+const PAGE_SIZE = 15;
+const STATUS_LABEL: Record<string, string> = { ACTIVE: "Active", DRAFT: "Draft", ARCHIVED: "Archived" };
 
 const RESULT: Record<Result, { tone: "success" | "warning" | "critical" | "neutral"; label: string }> = {
   buy: { tone: "success", label: "Can be bought" },
@@ -22,11 +25,10 @@ const RESULT: Record<Result, { tone: "success" | "warning" | "critical" | "neutr
 const yes = (v: boolean) => <s-badge tone={v ? "success" : "neutral"}>{v ? "Yes" : "No"}</s-badge>;
 
 export default function Check() {
-  const { shop, markets, profiles, hiddenCatalogIds, products } = useAppState();
+  const { shop, markets, profiles, hiddenCatalogIds, products, checkUi: ui } = useAppState();
   useStartProducts(products);
   const [params, setParams] = useSearchParams();
   const productId = params.get("product") ?? "";
-  const [search, setSearch] = useState("");
   const [state, setState] = useState<
     { status: "idle" } | { status: "loading" } | { status: "error"; message: string } | { status: "ready"; detail: ProductDetail | null }
   >({ status: "idle" });
@@ -48,13 +50,14 @@ export default function Check() {
     };
   }, [productId, nonce, hiddenCatalogIds]);
 
-  const q = search.trim().toLowerCase();
-  const matches = useMemo(() => {
-    if (!q) return [];
-    return products.rows
-      .filter((p) => [p.title, p.handle, p.vendor].some((v) => v.toLowerCase().includes(q)))
-      .slice(0, MAX_MATCHES + 1);
-  }, [products.rows, q]);
+  const { filters, setFilters, page, setPage } = ui;
+  const options = useMemo(() => filterOptions(products.rows), [products.rows]);
+  const filtered = useMemo(() => applyFilters(products.rows, filters, {}), [products.rows, filters]);
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, pages - 1);
+  const pageRows = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+  const chips = activeChips(filters, { catalogs: options.catalogs, profiles: [] });
+  const set = (patch: Partial<Filters>) => setFilters({ ...filters, ...patch });
 
   const check = useMemo(
     () =>
@@ -64,46 +67,127 @@ export default function Check() {
     [state, markets, profiles],
   );
 
-  const choose = (p: ProductRow) => {
-    setSearch("");
-    setParams({ product: p.numericId });
-  };
+  const choose = (numericId: string) => setParams({ product: numericId });
+  const back = () => setParams({});
 
   return (
     <s-page heading={`Product check · ${shop.name}`} inlineSize="large">
       <PageBody>
         <s-stack gap="large-100">
-          <s-section heading="Choose a product">
-            <s-stack gap="base">
-              <s-search-field
-                label="Search"
-                labelAccessibilityVisibility="exclusive"
-                placeholder="Search by title, handle or vendor"
-                value={search}
-                ref={onInput(setSearch)}
-              />
-              {products.status === "loading" || products.status === "idle" ? (
-                <Loading message={products.loaded > 0 ? `Loading products… ${products.loaded} so far` : "Loading products…"} />
-              ) : null}
-              {products.status === "error" ? <s-banner tone="critical" heading="Could not load products">{products.error}</s-banner> : null}
-              {q && products.status === "ready" ? (
-                matches.length === 0 ? (
-                  <s-text color="subdued">No product matches. Draft and archived products are only searched after you load all products on the Products page.</s-text>
-                ) : (
-                  <s-stack gap="small-200">
-                    {matches.slice(0, MAX_MATCHES).map((p) => (
-                      <div key={p.id}>
-                        <s-button variant="tertiary" onClick={() => choose(p)}>
-                          {`${p.title}${p.status !== "ACTIVE" ? ` (${p.status.toLowerCase()})` : ""}`}
+          {!productId ? (
+            <s-section heading="Choose a product">
+              <s-stack gap="base">
+                {products.status === "loading" || products.status === "idle" ? (
+                  <Loading message={products.loaded > 0 ? `Loading products… ${products.loaded} so far` : "Loading products…"} />
+                ) : null}
+                {products.status === "error" ? <s-banner tone="critical" heading="Could not load products">{products.error}</s-banner> : null}
+                {products.status === "ready" ? (
+                  <>
+                    <FilterBar
+                      search={filters.search}
+                      onSearch={(search) => set({ search })}
+                      placeholder="Search by title, handle, vendor, type or tag"
+                      activeCount={chips.length}
+                      chips={chips}
+                      onRemoveChip={(key) => set({ [key]: "" } as Partial<Filters>)}
+                      onClear={() => setFilters(NO_FILTERS)}
+                    >
+                      <SelectField
+                        label="Status"
+                        value={filters.status}
+                        onChange={(status) => set({ status })}
+                        options={[{ value: "", label: "Any status" }, ...options.statuses.map((s) => ({ value: s, label: STATUS_LABEL[s] ?? s }))]}
+                      />
+                      <SelectField
+                        label="Vendor"
+                        value={filters.vendor}
+                        onChange={(vendor) => set({ vendor })}
+                        options={[{ value: "", label: "Any vendor" }, ...options.vendors.map((v) => ({ value: v, label: v }))]}
+                      />
+                      <SelectField
+                        label="Product type"
+                        value={filters.productType}
+                        onChange={(productType) => set({ productType })}
+                        options={[{ value: "", label: "Any type" }, ...options.types.map((t) => ({ value: t, label: t }))]}
+                      />
+                      <SelectField
+                        label="Tag"
+                        value={filters.tag}
+                        onChange={(tag) => set({ tag })}
+                        options={[{ value: "", label: "Any tag" }, ...options.tags.map((t) => ({ value: t, label: t }))]}
+                      />
+                      <SelectField
+                        label="Catalogue"
+                        value={filters.catalog}
+                        onChange={(catalog) => set({ catalog })}
+                        options={[
+                          { value: "", label: "Any" },
+                          { value: NONE, label: "Not in any catalogue" },
+                          { value: ANY, label: "In any catalogue" },
+                          ...options.catalogs.map((c) => ({ value: c.id, label: c.title })),
+                        ]}
+                      />
+                    </FilterBar>
+                    <s-text color="subdued">
+                      {filtered.length} of {products.rows.length} products. Draft and archived products appear after you load all products on the Products page.
+                    </s-text>
+                    {filtered.length === 0 ? (
+                      <s-stack gap="small-100">
+                        <s-paragraph>No products match these filters.</s-paragraph>
+                        <div>
+                          <s-button onClick={() => setFilters(NO_FILTERS)}>Clear filters</s-button>
+                        </div>
+                      </s-stack>
+                    ) : (
+                      <s-table>
+                        <s-table-header-row>
+                          <s-table-header>Product</s-table-header>
+                          <s-table-header>Vendor</s-table-header>
+                          <s-table-header>Type</s-table-header>
+                          <s-table-header>Status</s-table-header>
+                          <s-table-header>Check</s-table-header>
+                        </s-table-header-row>
+                        <s-table-body>
+                          {pageRows.map((p) => (
+                            <s-table-row key={p.id}>
+                              <s-table-cell>{p.title}</s-table-cell>
+                              <s-table-cell>{p.vendor || "—"}</s-table-cell>
+                              <s-table-cell>{p.productType || "—"}</s-table-cell>
+                              <s-table-cell>
+                                <s-badge tone={p.status === "ACTIVE" ? "success" : "neutral"}>{STATUS_LABEL[p.status] ?? p.status}</s-badge>
+                              </s-table-cell>
+                              <s-table-cell>
+                                <s-button onClick={() => choose(p.numericId)}>Check</s-button>
+                              </s-table-cell>
+                            </s-table-row>
+                          ))}
+                        </s-table-body>
+                      </s-table>
+                    )}
+                    {filtered.length > PAGE_SIZE ? (
+                      <s-stack direction="inline" gap="base" alignItems="center">
+                        <s-button disabled={safePage === 0 || undefined} onClick={() => setPage(safePage - 1)}>
+                          Previous
                         </s-button>
-                      </div>
-                    ))}
-                    {matches.length > MAX_MATCHES ? <s-text color="subdued">More match. Type more to narrow.</s-text> : null}
-                  </s-stack>
-                )
-              ) : null}
-            </s-stack>
-          </s-section>
+                        <s-text color="subdued">
+                          Page {safePage + 1} of {pages}
+                        </s-text>
+                        <s-button disabled={safePage >= pages - 1 || undefined} onClick={() => setPage(safePage + 1)}>
+                          Next
+                        </s-button>
+                      </s-stack>
+                    ) : null}
+                  </>
+                ) : null}
+              </s-stack>
+            </s-section>
+          ) : (
+            <div>
+              <s-button icon="arrow-left" onClick={back}>
+                Back to the list
+              </s-button>
+            </div>
+          )}
 
           {state.status === "loading" ? (
             <s-section heading="Reading the product">

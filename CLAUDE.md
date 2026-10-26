@@ -120,7 +120,7 @@ app/
 scripts/preload.mjs              modulepreload hints (ROUTE_IDS = views/layout, views/overview)
 public/_headers                  frame-ancestors for Shopify + immutable cache for /assets/*
 ```
-209 tests in 21 files (`app/lib/*.test.ts`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
+211 tests in 21 files (`app/lib/*.test.ts`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
 which runs the real `applyMove` / `runPlan` against a fake Shopify (incl. a silent no-op). `testkit.ts` has the builders.
 No UI tests; no test for `shopify-data` queries (they only run inside the admin).
 
@@ -193,7 +193,7 @@ Zones (30 per location group) are flagged (`zonesTruncated`).
 ## Commands
 
 `npm test` (vitest), `npm run typecheck`, `npm run build`, `npm run deploy`. Before any handoff run
-test + typecheck + build. Expected: 209 tests pass, typecheck clean.
+test + typecheck + build. Expected: 211 tests pass, typecheck clean.
 
 ## Channels & catalogues page (added 2026-10-26)
 
@@ -214,6 +214,9 @@ test + typecheck + build. Expected: 209 tests pass, typecheck clean.
   (the shared `RunFlow`, `InventoryReview`, `lib/inventory.ts`, `stockEngine`).
 - Settings (each switch on/off): **Track quantity** (`inventoryItem.tracked = true`), **Sold out = not available** (`inventoryPolicy = DENY`),
   **Set the quantity** (default 1, at one or MORE ticked locations (checkboxes, none ticked by default unless the store has one), applied to EVERY variant of each selected product; replaces higher stock too, warned; unticked locations are never touched).
+- Product list (Step 1) shows, per product, read only: **Tracked** (all / none / n of N), **When sold out** (Stops at 0 / Keeps selling / n of N),
+  and **Stock by location** (every location where a variant is stocked, available total, "(n of N variants)" when partial). Read for the products on
+  the current page only (2 per call, first 40 variants, 8 locations: `readStockOverview`, `summarizeStock`), cached until "Refresh stock" or after a write.
 - Calls: `productVariantsBulkUpdate` (tracked + policy, one per product, 250 variants max per call) then `inventorySetQuantities`
   (name `available`, reason `correction`, `changeFromQuantity: null` because API 2026-04+ has no `ignoreCompareQuantity`). Tracking goes first.
 - Variants not stocked at the chosen location get no quantity (warned; stock them in Shopify first). Products with more than 250 variants are left out.

@@ -72,7 +72,7 @@ vi.mock("./admin", async (orig) => {
   };
 });
 
-import { findStockDrift, findStockMismatch, planStock, readStock, recheckStock, runStock, settingsProblem, stockEngine, stockQuery, type StockSettings } from "./inventory";
+import { findStockDrift, findStockMismatch, planStock, readStock, recheckStock, runStock, settingsProblem, stockEngine, stockQuery, summarizeStock, type StockSettings } from "./inventory";
 import { product } from "./testkit";
 
 const LOC1 = { id: "loc1", name: "Warehouse" };
@@ -232,5 +232,30 @@ describe("several locations", () => {
     const p = await plan(["p3"], both);
     expect(p.totals.notStocked).toBe(1);
     expect(p.lines).toHaveLength(0);
+  });
+});
+
+describe("summarizeStock", () => {
+  const level = (id: string, name: string, q: number) => ({ location: { id, name }, quantities: [{ name: "available", quantity: q }] });
+  it("adds up what is stocked at each location and counts tracked and stop-at-zero variants", () => {
+    const s = summarizeStock({
+      id: "p",
+      variants: {
+        pageInfo: { hasNextPage: false },
+        nodes: [
+          { inventoryPolicy: "DENY", inventoryItem: { tracked: true, inventoryLevels: { nodes: [level("l1", "London", 16), level("l2", "Berlin", 2)] } } },
+          { inventoryPolicy: "CONTINUE", inventoryItem: { tracked: false, inventoryLevels: { nodes: [level("l1", "London", 4)] } } },
+        ],
+      },
+    });
+    expect(s).toMatchObject({ variants: 2, complete: true, tracked: 1, stops: 1 });
+    expect(s.locations).toEqual([
+      { id: "l2", name: "Berlin", available: 2, variants: 1 },
+      { id: "l1", name: "London", available: 20, variants: 2 },
+    ]);
+  });
+  it("copes with a variant that has no inventory item and says when variants were cut off", () => {
+    const s = summarizeStock({ id: "p", variants: { pageInfo: { hasNextPage: true }, nodes: [{ inventoryPolicy: "DENY", inventoryItem: null }] } });
+    expect(s).toMatchObject({ variants: 1, complete: false, tracked: 0, stops: 1, locations: [] });
   });
 });

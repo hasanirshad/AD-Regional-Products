@@ -176,6 +176,94 @@ export async function readStock(ids: string[], locationIds: string[]): Promise<R
   return out;
 }
 
+// ---------------------------------------------------------------- overview (read only, every location)
+
+/** What a product looks like now, over all its variants: shown next to the product on the Inventory page. */
+export type StockSummary = {
+  id: string;
+  variants: number;
+  /** false = the product has more variants than were read. */
+  complete: boolean;
+  tracked: number;
+  /** Variants that stop selling at 0 (policy DENY). */
+  stops: number;
+  /** Every location where at least one variant is stocked, with the available total over the variants stocked there. */
+  locations: { id: string; name: string; available: number; variants: number }[];
+};
+
+const OVERVIEW = `#graphql
+  query InventoryOverview($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Product {
+        id
+        variants(first: 40) {
+          pageInfo { hasNextPage }
+          nodes {
+            inventoryPolicy
+            inventoryItem {
+              tracked
+              inventoryLevels(first: 8) {
+                nodes {
+                  location { id name }
+                  quantities(names: ["available"]) { name quantity }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }`;
+
+type RawOverview = {
+  id: string;
+  variants: {
+    pageInfo: { hasNextPage: boolean };
+    nodes: {
+      inventoryPolicy: string;
+      inventoryItem?: {
+        tracked: boolean;
+        inventoryLevels?: { nodes: { location: { id: string; name: string }; quantities: { name: string; quantity: number }[] }[] } | null;
+      } | null;
+    }[];
+  };
+} | null;
+
+export function summarizeStock(raw: NonNullable<RawOverview>): StockSummary {
+  const byLocation = new Map<string, StockSummary["locations"][number]>();
+  let tracked = 0;
+  let stops = 0;
+  for (const v of raw.variants.nodes) {
+    if (v.inventoryItem?.tracked) tracked++;
+    if (v.inventoryPolicy === "DENY") stops++;
+    for (const level of v.inventoryItem?.inventoryLevels?.nodes ?? []) {
+      const q = level.quantities.find((x) => x.name === "available")?.quantity ?? 0;
+      const cur = byLocation.get(level.location.id) ?? { id: level.location.id, name: level.location.name, available: 0, variants: 0 };
+      cur.available += q;
+      cur.variants++;
+      byLocation.set(level.location.id, cur);
+    }
+  }
+  return {
+    id: raw.id,
+    variants: raw.variants.nodes.length,
+    complete: !raw.variants.pageInfo.hasNextPage,
+    tracked,
+    stops,
+    locations: [...byLocation.values()].sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+/** Reads the current stock picture of products (all locations). Two products per read keeps each read cheap. */
+export async function readStockOverview(ids: string[]): Promise<Record<string, StockSummary>> {
+  const out: Record<string, StockSummary> = {};
+  for (let i = 0; i < ids.length; i += 2) {
+    const d = await adminGraphql<{ nodes: RawOverview[] }>(OVERVIEW, { ids: ids.slice(i, i + 2) });
+    for (const n of d.nodes) if (n) out[n.id] = summarizeStock(n);
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- plan (pure)
 
 export function settingsProblem(s: StockSettings): string | null {
