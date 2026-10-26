@@ -120,7 +120,7 @@ app/
 scripts/preload.mjs              modulepreload hints (ROUTE_IDS = views/layout, views/overview)
 public/_headers                  frame-ancestors for Shopify + immutable cache for /assets/*
 ```
-227 tests in 22 files (`app/lib/*.test.ts`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
+231 tests in 22 files (`app/lib/*.test.ts`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
 which runs the real `applyMove` / `runPlan` against a fake Shopify (incl. a silent no-op). `testkit.ts` has the builders.
 No UI tests; no test for `shopify-data` queries (they only run inside the admin).
 
@@ -193,7 +193,7 @@ Zones (30 per location group) are flagged (`zonesTruncated`).
 ## Commands
 
 `npm test` (vitest), `npm run typecheck`, `npm run build`, `npm run deploy`. Before any handoff run
-test + typecheck + build. Expected: 227 tests pass, typecheck clean.
+test + typecheck + build. Expected: 231 tests pass, typecheck clean.
 
 ## Channels & catalogues page (added 2026-10-26)
 
@@ -218,8 +218,9 @@ test + typecheck + build. Expected: 227 tests pass, typecheck clean.
   and **Stock by location** (every location where a variant is stocked, available total, "(n of N variants)" when partial). Read for the products on
   the current page only (2 per call, first 40 variants, 8 locations: `readStockOverview`, `summarizeStock`), cached until "Refresh stock" or after a write.
 - **Filter panel** (`components/InventoryFilters.tsx`, logic in `lib/inventoryFilter.ts`, state `invFilters` in the layout): search box + "Filters (n)" button that
-  opens a panel above the table + one removable chip per value. Several values per filter (a product matches if it has ANY chosen value; different
-  filters must ALL match). Type-and-pick lists (with counts, "Browse all"): Tag, Vendor, Product type, Catalogue, Stocked at (location). Tick boxes:
+  opens a panel above the table + one removable chip per value. Different boxes must ALL match (AND). Several values in one box: any of them by default; for Tag, Catalogue and
+  Stocked-at a "A product needs: any / all of the chosen" dropdown appears (vendor, type and status are always "any"). **Tag is a plain dropdown** (pick one, it
+  is added to the chosen tags; Hasan asked for it). Type-and-pick lists (with counts, "Browse all"): Vendor, Product type, Catalogue, Stocked at (location). Tick boxes:
   Status, Availability, Tracked. Number of variants: at least / at most. Availability, Tracked and Stocked-at need the stock of each product: when one is on,
   the stock of ALL products matching the other filters is read in the background (2 per call, list fills as it goes, "Select all matching" waits).
   Products whose stock is not read yet are left out and counted (`applyStockFilters().waiting`). Other pages still use the old `FilterBar`.

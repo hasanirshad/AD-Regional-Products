@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState } from "react";
 import { onChecked, onInput, onRemove } from "../lib/dom";
 import { NONE } from "../lib/filter";
-import { activeInvChips, NO_INV_FILTERS, type Availability, type InvFilters, type Tracking } from "../lib/inventoryFilter";
+import { activeInvChips, NO_INV_FILTERS, type Availability, type InvFilters, type Match, type Tracking } from "../lib/inventoryFilter";
+import { SelectField } from "./SelectField";
 import { useTypedSearch } from "./FilterBar";
 
 export type PickOption = { value: string; label: string; count?: number };
@@ -104,9 +105,9 @@ export function InventoryFilters({
       {open ? (
         <s-box padding="base" border="base" borderRadius="base">
           <s-stack gap="base">
-            <s-text color="subdued">Several values in one box mean "any of these". Different boxes all have to match.</s-text>
+            <s-text color="subdued">Products must match every box you fill in (AND). With several values in one box, you choose whether a product needs any of them or all of them.</s-text>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16, alignItems: "start" }}>
-              <MultiPicker label="Tag" placeholder="Type a tag…" options={options.tag} selected={filters.tag} onChange={(tag) => set({ tag })} />
+              <TagDropdown options={options.tag} selected={filters.tag} onChange={(tag) => set({ tag })} match={filters.tagMatch} onMatch={(tagMatch) => set({ tagMatch })} />
               <MultiPicker label="Vendor" placeholder="Type a vendor…" options={options.vendor} selected={filters.vendor} onChange={(vendor) => set({ vendor })} />
               <MultiPicker label="Product type" placeholder="Type a product type…" options={options.productType} selected={filters.productType} onChange={(productType) => set({ productType })} />
               <MultiPicker
@@ -115,6 +116,8 @@ export function InventoryFilters({
                 options={[{ value: NONE, label: "In no catalogue" }, ...options.catalog]}
                 selected={filters.catalog}
                 onChange={(catalog) => set({ catalog })}
+                match={filters.catalogMatch}
+                onMatch={(catalogMatch) => set({ catalogMatch })}
               />
               <ChoiceRow label="Status" options={options.status} selected={filters.status} onChange={(status) => set({ status })} />
               <VariantRange min={filters.min} max={filters.max} onChange={(min, max) => set({ min, max })} />
@@ -131,6 +134,8 @@ export function InventoryFilters({
                 options={[...options.locations, { value: NONE, label: "Stocked nowhere" }]}
                 selected={filters.locations}
                 onChange={(locations) => set({ locations })}
+                match={filters.locationMatch}
+                onMatch={(locationMatch) => set({ locationMatch })}
               />
             </div>
             {stock.needed ? (
@@ -156,12 +161,16 @@ function MultiPicker({
   options,
   selected,
   onChange,
+  match,
+  onMatch,
 }: {
   label: string;
   placeholder: string;
   options: PickOption[];
   selected: string[];
   onChange: (values: string[]) => void;
+  match?: Match;
+  onMatch?: (m: Match) => void;
 }) {
   const [text, setText] = useState("");
   const [browse, setBrowse] = useState(false);
@@ -183,6 +192,7 @@ function MultiPicker({
           {browse ? "Hide the list" : `Browse all (${options.length})`}
         </s-button>
       </div>
+      {match && onMatch && selected.length > 1 ? <MatchSelect value={match} onChange={onMatch} /> : null}
       {show ? (
         <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid var(--p-color-border, #d0d0d0)", borderRadius: 8, padding: 4 }}>
           {matches.length === 0 ? (
@@ -198,6 +208,50 @@ function MultiPicker({
           )}
         </div>
       ) : null}
+    </s-stack>
+  );
+}
+
+function MatchSelect({ value, onChange }: { value: Match; onChange: (m: Match) => void }) {
+  return (
+    <SelectField
+      label="A product needs"
+      value={value}
+      onChange={(v) => onChange(v === "all" ? "all" : "any")}
+      options={[
+        { value: "any", label: "Any of the chosen" },
+        { value: "all", label: "All of the chosen" },
+      ]}
+    />
+  );
+}
+
+// Tags as a plain dropdown: pick one, it is added to the chosen tags, pick another to add more.
+function TagDropdown({
+  options,
+  selected,
+  onChange,
+  match,
+  onMatch,
+}: {
+  options: PickOption[];
+  selected: string[];
+  onChange: (values: string[]) => void;
+  match: Match;
+  onMatch: (m: Match) => void;
+}) {
+  const left = options.filter((o) => !selected.includes(o.value));
+  return (
+    <s-stack gap="small-200">
+      {/* The key makes the dropdown start again at "Add a tag…" after each pick. */}
+      <SelectField
+        key={selected.length}
+        label={selected.length ? `Tag (${selected.length})` : "Tag"}
+        value=""
+        onChange={(v) => v && onChange([...selected, v])}
+        options={[{ value: "", label: left.length ? "Add a tag…" : "No more tags" }, ...left.map((o) => ({ value: o.value, label: o.count !== undefined ? `${o.label} (${o.count})` : o.label }))]}
+      />
+      {selected.length > 1 ? <MatchSelect value={match} onChange={onMatch} /> : null}
     </s-stack>
   );
 }

@@ -8,6 +8,9 @@ import type { ProductRow } from "./types";
 export type Availability = "available" | "soldout" | "partly";
 export type Tracking = "all" | "none" | "some";
 
+/** With several values in one box: the product has any of them, or all of them. */
+export type Match = "any" | "all";
+
 export type InvFilters = {
   search: string;
   status: string[];
@@ -22,6 +25,10 @@ export type InvFilters = {
   tracked: Tracking[];
   /** Location ids, or NONE (stocked nowhere). */
   locations: string[];
+  /** How several tags, several catalogues and several locations combine. (A product has one vendor, type and status, so those are always "any".) */
+  tagMatch: Match;
+  catalogMatch: Match;
+  locationMatch: Match;
 };
 
 export const NO_INV_FILTERS: InvFilters = {
@@ -36,7 +43,12 @@ export const NO_INV_FILTERS: InvFilters = {
   availability: [],
   tracked: [],
   locations: [],
+  tagMatch: "any",
+  catalogMatch: "any",
+  locationMatch: "any",
 };
+
+const test = <T,>(values: T[], mode: Match, has: (v: T) => boolean) => (mode === "all" ? values.every(has) : values.some(has));
 
 /** True when a filter needs the stock of each product (read from Shopify, product by product). */
 export const stockNeeded = (f: InvFilters): boolean => f.availability.length > 0 || f.tracked.length > 0 || f.locations.length > 0;
@@ -60,9 +72,9 @@ export function applyBaseFilters(rows: ProductRow[], f: InvFilters): ProductRow[
     if (f.status.length && !f.status.includes(p.status)) return false;
     if (f.vendor.length && !f.vendor.includes(p.vendor)) return false;
     if (f.productType.length && !f.productType.includes(p.productType)) return false;
-    if (f.tag.length && !f.tag.some((t) => p.tags.includes(t))) return false;
+    if (f.tag.length && !test(f.tag, f.tagMatch, (t) => p.tags.includes(t))) return false;
     if (f.catalog.length) {
-      const hit = f.catalog.some((c) => (c === NONE ? p.catalogs.length === 0 : c === ANY ? p.catalogs.length > 0 : p.catalogs.some((x) => x.id === c)));
+      const hit = test(f.catalog, f.catalogMatch, (c) => (c === NONE ? p.catalogs.length === 0 : c === ANY ? p.catalogs.length > 0 : p.catalogs.some((x) => x.id === c)));
       if (!hit) return false;
     }
     if (min !== null && p.variantCount < min) return false;
@@ -87,7 +99,7 @@ export function applyStockFilters(rows: ProductRow[], f: InvFilters, summaries: 
     if (f.availability.length && !f.availability.includes(availabilityOf(s))) return false;
     if (f.tracked.length && !f.tracked.includes(trackingOf(s))) return false;
     if (f.locations.length) {
-      const hit = f.locations.some((l) => (l === NONE ? s.locations.length === 0 : s.locations.some((x) => x.id === l)));
+      const hit = test(f.locations, f.locationMatch, (l) => (l === NONE ? s.locations.length === 0 : s.locations.some((x) => x.id === l)));
       if (!hit) return false;
     }
     return true;

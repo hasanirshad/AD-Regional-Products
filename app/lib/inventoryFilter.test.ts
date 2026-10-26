@@ -33,6 +33,29 @@ describe("base filters", () => {
   });
 });
 
+describe("filters combine with AND", () => {
+  const summaries = { a: sum("a", {}), b: sum("b", { tracked: 0 }), c: sum("c", { tracked: 0 }) };
+  const run = (flt: InvFilters) => applyStockFilters(applyBaseFilters(rows, flt), flt, summaries).rows.map((p) => p.id);
+  it("a tag and a tracking choice must both match", () => {
+    expect(run(f({ tag: ["oak"], tracked: ["all"] }))).toEqual(["a"]);
+    expect(run(f({ tag: ["oak"], tracked: ["none"] }))).toEqual(["b"]);
+    expect(run(f({ tag: ["new_stock"], tracked: ["none"] }))).toEqual([]);
+  });
+  it("vendor + type + status + availability all together", () => {
+    expect(run(f({ vendor: ["Hardman"], productType: ["Table"], status: ["DRAFT"], tracked: ["none"] }))).toEqual(["c"]);
+    expect(run(f({ vendor: ["Hardman"], productType: ["Table"], status: ["ACTIVE"], tracked: ["none"] }))).toEqual([]);
+  });
+  it("several tags: any of them by default, all of them when asked", () => {
+    expect(run(f({ tag: ["oak", "new_stock"] }))).toEqual(["a", "b"]);
+    expect(run(f({ tag: ["oak", "new_stock"], tagMatch: "all" }))).toEqual(["a"]);
+  });
+  it("several catalogues and locations can also be 'all'", () => {
+    expect(applyBaseFilters(rows, f({ catalog: ["c1", "c2"], catalogMatch: "all" })).map((p) => p.id)).toEqual(["c"]);
+    const two = { a: sum("a", { locations: [{ id: "L1", name: "A", available: 1, variants: 1 }, { id: "L2", name: "B", available: 1, variants: 1 }] }), b: sum("b", {}), c: sum("c", {}) };
+    expect(applyStockFilters(rows, f({ locations: ["L1", "L2"], locationMatch: "all" }), two).rows.map((p) => p.id)).toEqual(["a"]);
+  });
+});
+
 describe("stock filters", () => {
   const summaries = {
     a: sum("a", {}),
