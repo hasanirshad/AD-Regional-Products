@@ -21,8 +21,8 @@ export type VariantStock = {
   tracked: boolean;
   /** DENY = stops selling at zero. CONTINUE = keeps selling at zero. */
   policy: "DENY" | "CONTINUE";
-  /** Available quantity at the chosen location. null = the variant is not stocked there. */
-  quantity: number | null;
+  /** Available quantity at each chosen location (by location id). null = the variant is not stocked there. */
+  quantities: Record<string, number | null>;
 };
 
 export type ProductStock = { id: string; status: string; variants: VariantStock[]; complete: boolean };
@@ -33,17 +33,19 @@ export type StockSettings = {
   stopAtZero: boolean;
   setQuantity: boolean;
   quantity: number;
-  locationId: string;
+  /** The locations the quantity is set at. */
+  locations: StockLocation[];
 };
 
-export type VariantChange = { variant: VariantStock; track: boolean; policy: boolean; quantity: number | null };
+/** `setAt` = the chosen locations where this variant gets the quantity (it is stocked there and differs). */
+export type VariantChange = { variant: VariantStock; track: boolean; policy: boolean; setAt: string[] };
 
 export type StockLine = {
   product: ProductRow;
   /** Every variant as read when the plan was built (to spot changes before Apply). */
   before: VariantStock[];
   changes: VariantChange[];
-  /** Variants that could not get a quantity because they are not stocked at the location. */
+  /** Places (variant x location) that could not get a quantity because the variant is not stocked there. */
   notStocked: number;
 };
 
@@ -52,7 +54,6 @@ export type StockPlan = {
   unchanged: ProductRow[];
   skipped: { product: ProductRow; reason: string }[];
   settings: StockSettings;
-  locationName: string;
   totals: { variants: number; track: number; policy: number; quantity: number; lowered: number; notStocked: number };
   blocker: string | null;
   warnings: string[];
@@ -60,8 +61,17 @@ export type StockPlan = {
 
 // ---------------------------------------------------------------- reading
 
-const STOCK = `#graphql
-  query InventoryStock($ids: [ID!]!, $locationId: ID!, $first: Int!) {
+/** One aliased `inventoryLevel` per chosen location (l0, l1, ...), so every location is read in the same call. */
+export const levelAlias = (i: number) => `l${i}`;
+
+export function stockQuery(locationCount: number): string {
+  const vars = Array.from({ length: locationCount }, (_, i) => `, $loc${i}: ID!`).join("");
+  const levels = Array.from(
+    { length: locationCount },
+    (_, i) => `${levelAlias(i)}: inventoryLevel(locationId: $loc${i}) { id quantities(names: ["available"]) { name quantity } }`,
+  ).join("\n                ");
+  return `#graphql
+  query InventoryStock($ids: [ID!]!, $first: Int!${vars}) {
     nodes(ids: $ids) {
       ... on Product {
         id
@@ -76,16 +86,14 @@ const STOCK = `#graphql
             inventoryItem {
               id
               tracked
-              inventoryLevel(locationId: $locationId) {
-                id
-                quantities(names: ["available"]) { name quantity }
-              }
+              ${levels}
             }
           }
         }
       }
     }
   }`;
+}
 
 const LOCATIONS = `#graphql
   query StockLocations {
@@ -102,22 +110,25 @@ type RawProduct = {
       title: string;
       sku?: string | null;
       inventoryPolicy: string;
-      inventoryItem?: {
+      inventoryItem?: ({
         id: string;
         tracked: boolean;
-        inventoryLevel?: { quantities: { name: string; quantity: number }[] } | null;
-      } | null;
+      } & Record<string, { quantities: { name: string; quantity: number }[] } | null | undefined | string | boolean>) | null;
     }[];
   };
 } | null;
 
-export function parseStock(raw: NonNullable<RawProduct>): ProductStock {
+export function parseStock(raw: NonNullable<RawProduct>, locationIds: string[]): ProductStock {
   return {
     id: raw.id,
     status: raw.status,
     complete: !raw.variants.pageInfo.hasNextPage,
     variants: raw.variants.nodes.map((v) => {
-      const level = v.inventoryItem?.inventoryLevel;
+      const quantities: Record<string, number | null> = {};
+      locationIds.forEach((id, i) => {
+        const level = v.inventoryItem?.[levelAlias(i)] as { quantities: { name: string; quantity: number }[] } | null | undefined;
+        quantities[id] = level ? (level.quantities.find((q) => q.name === "available")?.quantity ?? 0) : null;
+      });
       return {
         id: v.id,
         title: v.title,
@@ -125,7 +136,7 @@ export function parseStock(raw: NonNullable<RawProduct>): ProductStock {
         itemId: v.inventoryItem?.id ?? "",
         tracked: v.inventoryItem?.tracked ?? false,
         policy: v.inventoryPolicy === "DENY" ? "DENY" : "CONTINUE",
-        quantity: level ? (level.quantities.find((q) => q.name === "available")?.quantity ?? 0) : null,
+        quantities,
       };
     }),
   };
@@ -141,21 +152,26 @@ const FIRST = 100;
 const FIRST_ALONE = 250;
 
 /** Reads the stock settings of each product. Missing = not found. Products with very many variants are read on their own. */
-export async function readStock(ids: string[], locationId: string): Promise<Record<string, ProductStock>> {
+export async function readStock(ids: string[], locationIds: string[]): Promise<Record<string, ProductStock>> {
   const out: Record<string, ProductStock> = {};
   const again: string[] = [];
-  for (let i = 0; i < ids.length; i += CHUNK) {
-    const d = await adminGraphql<{ nodes: RawProduct[] }>(STOCK, { ids: ids.slice(i, i + CHUNK), locationId, first: FIRST });
+  const query = stockQuery(locationIds.length);
+  const locVars = Object.fromEntries(locationIds.map((id, i) => [`loc${i}`, id]));
+  // Each chosen location adds to the cost of a read, so fewer products and variants per read when many are chosen.
+  const chunk = Math.max(1, Math.floor(CHUNK / Math.max(1, Math.ceil(locationIds.length / 2))));
+  const first = locationIds.length > 3 ? 50 : FIRST;
+  for (let i = 0; i < ids.length; i += chunk) {
+    const d = await adminGraphql<{ nodes: RawProduct[] }>(query, { ids: ids.slice(i, i + chunk), first, ...locVars });
     for (const n of d.nodes) {
       if (!n) continue;
       if (n.variants.pageInfo.hasNextPage) again.push(n.id);
-      else out[n.id] = parseStock(n);
+      else out[n.id] = parseStock(n, locationIds);
     }
   }
   for (const id of again) {
-    const d = await adminGraphql<{ nodes: RawProduct[] }>(STOCK, { ids: [id], locationId, first: FIRST_ALONE });
+    const d = await adminGraphql<{ nodes: RawProduct[] }>(query, { ids: [id], first: FIRST_ALONE, ...locVars });
     const n = d.nodes[0];
-    if (n) out[n.id] = parseStock(n);
+    if (n) out[n.id] = parseStock(n, locationIds);
   }
   return out;
 }
@@ -167,7 +183,7 @@ export function settingsProblem(s: StockSettings): string | null {
   if (s.setQuantity) {
     if (!Number.isInteger(s.quantity) || s.quantity < 0) return "The quantity must be a whole number, 0 or more.";
     if (s.quantity > 1_000_000) return "The quantity is too large.";
-    if (!s.locationId) return "Choose the location the quantity is set at.";
+    if (s.locations.length === 0) return "Choose at least one location for the quantity.";
   }
   return null;
 }
@@ -176,7 +192,6 @@ export function planStock(input: {
   products: ProductRow[];
   states: Record<string, ProductStock>;
   settings: StockSettings;
-  locationName: string;
 }): StockPlan {
   const { settings } = input;
   const lines: StockLine[] = [];
@@ -203,17 +218,22 @@ export function planStock(input: {
     for (const v of s.variants) {
       const track = settings.track && !v.tracked;
       const policy = settings.stopAtZero && v.policy !== "DENY";
-      let quantity: number | null = null;
+      const setAt: string[] = [];
       if (settings.setQuantity) {
-        if (v.quantity === null) notStocked++;
-        else if (v.quantity !== settings.quantity) quantity = settings.quantity;
+        for (const loc of settings.locations) {
+          const q = v.quantities[loc.id] ?? null;
+          if (q === null) notStocked++;
+          else if (q !== settings.quantity) {
+            setAt.push(loc.id);
+            if (q > settings.quantity) totals.lowered++;
+          }
+        }
       }
-      if (quantity !== null && v.quantity !== null && v.quantity > settings.quantity) totals.lowered++;
-      if (track || policy || quantity !== null) {
-        changes.push({ variant: v, track, policy, quantity });
+      if (track || policy || setAt.length > 0) {
+        changes.push({ variant: v, track, policy, setAt });
         if (track) totals.track++;
         if (policy) totals.policy++;
-        if (quantity !== null) totals.quantity++;
+        totals.quantity += setAt.length;
       }
     }
     totals.variants += s.variants.length;
@@ -223,39 +243,42 @@ export function planStock(input: {
   }
 
   const warnings: string[] = [];
-  if (totals.lowered > 0) warnings.push(`${totals.lowered} variant${totals.lowered === 1 ? "" : "s"} currently have more than ${settings.quantity} in stock. They will be lowered.`);
+  if (totals.lowered > 0) warnings.push(`${totals.lowered} stock level${totals.lowered === 1 ? " is" : "s are"} currently higher than ${settings.quantity}. They will be lowered.`);
   if (totals.notStocked > 0) {
     warnings.push(
-      `${totals.notStocked} variant${totals.notStocked === 1 ? " is" : "s are"} not stocked at ${input.locationName}. They get no quantity (add the location to them in Shopify first).`,
+      `${totals.notStocked} variant-location pair${totals.notStocked === 1 ? " is" : "s are"} not stocked (the variant is not stocked at that location). They get no quantity: add the location to the variant in Shopify first.`,
     );
   }
-  return { lines, unchanged, skipped, settings, locationName: input.locationName, totals, blocker: settingsProblem(settings), warnings };
+  return { lines, unchanged, skipped, settings, totals, blocker: settingsProblem(settings), warnings };
 }
 
 /** One short line describing a product's variants, for the report. */
-export function describeStock(variants: VariantStock[]): string {
+export function describeStock(variants: VariantStock[], locations: StockLocation[]): string {
   const n = variants.length;
   const tracked = variants.filter((v) => v.tracked).length;
   const stops = variants.filter((v) => v.policy === "DENY").length;
-  const qty = variants.map((v) => (v.quantity === null ? "–" : String(v.quantity)));
-  const shown = qty.length > 8 ? `${qty.slice(0, 8).join(", ")}, …` : qty.join(", ");
-  return `tracked ${tracked}/${n} · stops at 0: ${stops}/${n} · stock: ${shown}`;
+  const at = locations.map((loc) => {
+    const qty = variants.map((v) => (v.quantities[loc.id] == null ? "–" : String(v.quantities[loc.id])));
+    return `${loc.name} ${qty.length > 8 ? `${qty.slice(0, 8).join(", ")}, …` : qty.join(", ")}`;
+  });
+  return `tracked ${tracked}/${n} · stops at 0: ${stops}/${n}${at.length ? ` · stock: ${at.join(" | ")}` : ""}`;
 }
 
 export function changeLabels(l: StockLine, s: StockSettings): string[] {
   const out: string[] = [];
   const t = l.changes.filter((c) => c.track).length;
   const p = l.changes.filter((c) => c.policy).length;
-  const q = l.changes.filter((c) => c.quantity !== null).length;
+  const q = l.changes.reduce((n, c) => n + c.setAt.length, 0);
   if (t) out.push(`Track quantity: ${t} variant${t === 1 ? "" : "s"}`);
   if (p) out.push(`Stop selling at 0: ${p} variant${p === 1 ? "" : "s"}`);
-  if (q) out.push(`Quantity set to ${s.quantity}: ${q} variant${q === 1 ? "" : "s"}`);
+  if (q) out.push(`Quantity set to ${s.quantity}: ${q} stock level${q === 1 ? "" : "s"}`);
   return out;
 }
 
 // ---------------------------------------------------------------- checks
 
-const sameVariant = (a: VariantStock, b: VariantStock) => a.tracked === b.tracked && a.policy === b.policy && a.quantity === b.quantity;
+const sameVariant = (a: VariantStock, b: VariantStock) =>
+  a.tracked === b.tracked && a.policy === b.policy && Object.keys(a.quantities).every((k) => a.quantities[k] === b.quantities[k]);
 
 /** BEFORE Apply: has any product changed since the review was built? */
 export function findStockDrift(lines: StockLine[], state: Record<string, ProductStock>): Finding[] {
@@ -291,14 +314,23 @@ export function findStockMismatch(lines: StockLine[], settings: StockSettings, s
       if (!v) out.push({ productId: l.product.id, title, message: `Variant ${name} was not found after the change.` });
       else if (c.track && !v.tracked) out.push({ productId: l.product.id, title, message: `Variant ${name} is still not tracked.` });
       else if (c.policy && v.policy !== "DENY") out.push({ productId: l.product.id, title, message: `Variant ${name} still keeps selling at 0.` });
-      else if (c.quantity !== null && v.quantity !== settings.quantity) out.push({ productId: l.product.id, title, message: `Variant ${name} shows ${v.quantity ?? "no"} in stock, not ${settings.quantity}.` });
+      else {
+        for (const id of c.setAt) {
+          const q = v.quantities[id];
+          if (q !== settings.quantity) {
+            const where = settings.locations.find((x) => x.id === id)?.name ?? "the location";
+            out.push({ productId: l.product.id, title, message: `Variant ${name} shows ${q ?? "no"} in stock at ${where}, not ${settings.quantity}.` });
+            break;
+          }
+        }
+      }
     }
   }
   return out;
 }
 
 export async function recheckStock(lines: StockLine[], settings: StockSettings): Promise<Finding[]> {
-  return findStockDrift(lines, await readStock(lines.map((l) => l.product.id), settings.locationId));
+  return findStockDrift(lines, await readStock(lines.map((l) => l.product.id), settings.locations.map((x) => x.id)));
 }
 
 // ---------------------------------------------------------------- writes
@@ -347,9 +379,9 @@ async function applyLines(lines: StockLine[], settings: StockSettings, hooks: Pi
         assertNoUserErrors(d.productVariantsBulkUpdate.userErrors, "Updating variants");
       }
       // 2. the quantity, after tracking is on
-      const quantities = l.changes
-        .filter((c) => c.quantity !== null)
-        .map((c) => ({ inventoryItemId: c.variant.itemId, locationId: settings.locationId, quantity: c.quantity as number, changeFromQuantity: null }));
+      const quantities = l.changes.flatMap((c) =>
+        c.setAt.map((locationId) => ({ inventoryItemId: c.variant.itemId, locationId, quantity: settings.quantity, changeFromQuantity: null })),
+      );
       for (let i = 0; i < quantities.length; i += BATCH) {
         const d = await adminGraphql<{ inventorySetQuantities: { userErrors: { message: string }[] } }>(SET_QUANTITIES, {
           input: { name: "available", reason: "correction", quantities: quantities.slice(i, i + BATCH) },
@@ -373,17 +405,18 @@ export async function runStock(settings: StockSettings, lines: StockLine[], hook
 
   hooks.onStage?.("verifying");
   const finished = lines.filter((l) => applied.succeeded.includes(l.product.id));
+  const locationIds = settings.locations.map((x) => x.id);
   let mismatches: Finding[] = [];
   let final: Record<string, ProductStock> = {};
   let readError = "";
   try {
-    final = await readStock(finished.map((l) => l.product.id), settings.locationId);
+    final = await readStock(finished.map((l) => l.product.id), locationIds);
     mismatches = findStockMismatch(finished, settings, final);
     if (mismatches.length > 0) {
       await wait(hooks.retryWaitMs ?? 1500);
       const bad = new Set(mismatches.map((m) => m.productId));
       const again = finished.filter((l) => bad.has(l.product.id));
-      const reread = await readStock(again.map((l) => l.product.id), settings.locationId);
+      const reread = await readStock(again.map((l) => l.product.id), locationIds);
       final = { ...final, ...reread };
       mismatches = findStockMismatch(again, settings, reread);
     }
@@ -395,13 +428,13 @@ export async function runStock(settings: StockSettings, lines: StockLine[], hook
 
   const rows = lines.map((l): ReportRow => {
     const base = { productId: l.product.id, title: l.product.title, handle: l.product.handle };
-    const before = describeStock(l.before);
+    const before = describeStock(l.before, settings.locations);
     const added = changeLabels(l, settings);
     const failure = applied.failures.get(l.product.id);
     if (failure !== undefined) return { ...base, before, after: before, added: [], removed: [], status: "failed", message: failure };
     if (!applied.succeeded.includes(l.product.id)) return { ...base, before, after: before, added: [], removed: [], status: "not applied", message: "Not reached (stopped)." };
     if (readError) return { ...base, before, after: "unknown", added, removed: [], status: "not verified", message: `Could not read it back: ${readError}` };
-    const after = final[l.product.id] ? describeStock(final[l.product.id]!.variants) : "unknown";
+    const after = final[l.product.id] ? describeStock(final[l.product.id]!.variants, settings.locations) : "unknown";
     const mismatch = mismatchBy.get(l.product.id);
     if (mismatch) return { ...base, before, after, added, removed: [], status: "not verified", message: mismatch };
     return { ...base, before, after, added, removed: [], status: "done", message: "" };

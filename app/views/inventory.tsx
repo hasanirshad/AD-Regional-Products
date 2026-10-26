@@ -32,7 +32,7 @@ export default function Inventory() {
   const [stopAtZero, setStopAtZero] = useState(true);
   const [setQuantity, setSetQuantity] = useState(true);
   const [qtyText, setQtyText] = useState("1");
-  const [locationId, setLocationId] = useState("");
+  const [locationIds, setLocationIds] = useState<Set<string>>(new Set());
   const [stage, setStage] = useState<Stage>("choose");
   const [plan, setPlan] = useState<StockPlan | null>(null);
   const [error, setError] = useState("");
@@ -43,7 +43,7 @@ export default function Inventory() {
       .then((l) => {
         if (cancelled) return;
         setLocations(l);
-        setLocationId((cur) => cur || l[0]?.id || "");
+        setLocationIds((cur) => (cur.size === 0 && l.length === 1 ? new Set([l[0]!.id]) : cur));
       })
       .catch((err) => !cancelled && setLocationError(err instanceof Error ? err.message : String(err)));
     return () => {
@@ -67,7 +67,7 @@ export default function Inventory() {
     stopAtZero,
     setQuantity,
     quantity: /^\d+$/.test(qtyText.trim()) ? Number(qtyText.trim()) : Number.NaN,
-    locationId,
+    locations: (locations ?? []).filter((l) => locationIds.has(l.id)),
   };
   const problem = settingsProblem(settings);
 
@@ -93,9 +93,9 @@ export default function Inventory() {
     setStage("reading");
     try {
       const chosen = rows.filter((p) => selected.has(p.id));
-      const readAt = locationId || locations?.[0]?.id || "";
+      const readAt = settings.locations.map((l) => l.id);
       const states = await readStock(chosen.map((p) => p.id), readAt);
-      setPlan(planStock({ products: chosen, states, settings, locationName: locations?.find((l) => l.id === locationId)?.name ?? "the location" }));
+      setPlan(planStock({ products: chosen, states, settings }));
       setStage("review");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -328,14 +328,26 @@ export default function Inventory() {
                       <s-paragraph>{locationError}</s-paragraph>
                     </s-banner>
                   ) : (
-                    <SelectField
-                      label="Location"
-                      value={locationId}
-                      onChange={setLocationId}
-                      options={(locations ?? []).map((l) => ({ value: l.id, label: l.name }))}
-                    />
+                    <s-stack gap="small-200">
+                      <s-heading>Locations (tick one or more)</s-heading>
+                      {(locations ?? []).map((l) => (
+                        <s-checkbox
+                          key={l.id}
+                          label={l.name}
+                          checked={locationIds.has(l.id) || undefined}
+                          ref={onChecked((on) =>
+                            setLocationIds((prev) => {
+                              const next = new Set(prev);
+                              if (on) next.add(l.id);
+                              else next.delete(l.id);
+                              return next;
+                            }),
+                          )}
+                        />
+                      ))}
+                    </s-stack>
                   )}
-                  <s-text color="subdued">This replaces the current stock at that location, also when it is higher.</s-text>
+                  <s-text color="subdued">This replaces the current stock at each ticked location, also when it is higher. Locations you leave unticked are not touched.</s-text>
                 </s-stack>
               ) : null}
               {tooMany ? <s-banner tone="critical" heading={`Select ${MAX_SELECTED} products or fewer at a time (you have ${selected.size}).`} /> : null}

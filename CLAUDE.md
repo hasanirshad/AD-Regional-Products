@@ -120,7 +120,7 @@ app/
 scripts/preload.mjs              modulepreload hints (ROUTE_IDS = views/layout, views/overview)
 public/_headers                  frame-ancestors for Shopify + immutable cache for /assets/*
 ```
-205 tests in 21 files (`app/lib/*.test.ts`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
+209 tests in 21 files (`app/lib/*.test.ts`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
 which runs the real `applyMove` / `runPlan` against a fake Shopify (incl. a silent no-op). `testkit.ts` has the builders.
 No UI tests; no test for `shopify-data` queries (they only run inside the admin).
 
@@ -193,7 +193,7 @@ Zones (30 per location group) are flagged (`zonesTruncated`).
 ## Commands
 
 `npm test` (vitest), `npm run typecheck`, `npm run build`, `npm run deploy`. Before any handoff run
-test + typecheck + build. Expected: 205 tests pass, typecheck clean.
+test + typecheck + build. Expected: 209 tests pass, typecheck clean.
 
 ## Channels & catalogues page (added 2026-10-26)
 
@@ -213,12 +213,12 @@ test + typecheck + build. Expected: 205 tests pass, typecheck clean.
 - Route `/inventory` (nav "Inventory"), own selection/filters (`inventoryUi`). WRITES: password, review, recheck, first-product trial, read-back, CSV
   (the shared `RunFlow`, `InventoryReview`, `lib/inventory.ts`, `stockEngine`).
 - Settings (each switch on/off): **Track quantity** (`inventoryItem.tracked = true`), **Sold out = not available** (`inventoryPolicy = DENY`),
-  **Set the quantity** (default 1, at one chosen location, applied to EVERY variant of each selected product; replaces higher stock too, warned).
+  **Set the quantity** (default 1, at one or MORE ticked locations (checkboxes, none ticked by default unless the store has one), applied to EVERY variant of each selected product; replaces higher stock too, warned; unticked locations are never touched).
 - Calls: `productVariantsBulkUpdate` (tracked + policy, one per product, 250 variants max per call) then `inventorySetQuantities`
   (name `available`, reason `correction`, `changeFromQuantity: null` because API 2026-04+ has no `ignoreCompareQuantity`). Tracking goes first.
 - Variants not stocked at the chosen location get no quantity (warned; stock them in Shopify first). Products with more than 250 variants are left out.
-- Read: `locations`, and per product `variants { inventoryPolicy inventoryItem { tracked inventoryLevel(locationId) { quantities(names:["available"]) } } }`
-  (3 products x 100 variants per read; a product with more is read alone with 250).
+- Read: `locations`, and per product `variants { inventoryPolicy inventoryItem { tracked l0: inventoryLevel(locationId:$loc0){...} l1: ... } }`
+  (one alias per ticked location, built by `stockQuery(n)`; 3 products x 100 variants per read, fewer when many locations are ticked; a product with more variants is read alone with 250).
 - Scopes needed: `read_inventory, write_inventory, write_products`. UNVERIFIED on the real store: `inventoryItem.tracked` inside
   `productVariantsBulkUpdate`, setting `available` on an item right after it was tracked, and `changeFromQuantity: null`. Run the first-product trial.
 

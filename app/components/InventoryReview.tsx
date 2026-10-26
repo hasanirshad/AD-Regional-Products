@@ -24,7 +24,7 @@ export function InventoryReview({ plan, onBack, onFinished }: { plan: StockPlan;
           <s-stack gap="small-200">
             {s.track ? <Rule tone="success" label="Track quantity" text="Turned on for every variant." /> : null}
             {s.stopAtZero ? <Rule tone="success" label="Sold out = not available" text="Customers cannot buy a variant once its stock reaches 0." /> : null}
-            {s.setQuantity ? <Rule tone="info" label={`Quantity ${s.quantity}`} text={`Set at ${plan.locationName}, for every variant.`} /> : null}
+            {s.setQuantity ? <Rule tone="info" label={`Quantity ${s.quantity}`} text={`Set at ${s.locations.map((l) => l.name).join(", ")}, for every variant.`} /> : null}
           </s-stack>
           {plan.blocker ? <s-banner tone="critical" heading={plan.blocker} /> : null}
           {plan.warnings.map((w, i) => (
@@ -34,7 +34,7 @@ export function InventoryReview({ plan, onBack, onFinished }: { plan: StockPlan;
             <Stat label="Products to change" value={plan.lines.length} />
             <Stat label="Variants to track" value={plan.totals.track} />
             <Stat label="Variants set to stop at 0" value={plan.totals.policy} />
-            <Stat label="Quantities to set" value={plan.totals.quantity} />
+            <Stat label="Stock levels to set" value={plan.totals.quantity} />
             <Stat label="Already as chosen" value={plan.unchanged.length} />
             <Stat label="Left out" value={plan.skipped.length} />
           </div>
