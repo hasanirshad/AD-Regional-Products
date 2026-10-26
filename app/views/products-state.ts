@@ -154,7 +154,7 @@ export function useProductsUi(): ProductsUi {
   );
 }
 
-export type Shared = AppState & { products: ProductsLoad; ui: ProductsUi; channelsUi: ProductsUi; linksUi: ProductsUi };
+export type Shared = AppState & { products: ProductsLoad; ui: ProductsUi; channelsUi: ProductsUi; linksUi: ProductsUi; checkUi: ProductsUi; inventoryUi: ProductsUi };
 
 // Keep the effect-based starter next to the types it needs.
 export function useStartProducts(products: ProductsLoad) {

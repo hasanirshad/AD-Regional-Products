@@ -13,10 +13,12 @@ export default function Layout() {
   const ui = useProductsUi();
   const channelsUi = useProductsUi();
   const linksUi = useProductsUi();
+  const checkUi = useProductsUi();
+  const inventoryUi = useProductsUi();
 
   const shared = useMemo<Shared | null>(
-    () => (app ? { ...app, products, ui, channelsUi, linksUi } : null),
-    [app, products, ui, channelsUi, linksUi],
+    () => (app ? { ...app, products, ui, channelsUi, linksUi, checkUi, inventoryUi } : null),
+    [app, products, ui, channelsUi, linksUi, checkUi, inventoryUi],
   );
 
   return (
@@ -25,6 +27,7 @@ export default function Layout() {
         <s-link href="/">Overview</s-link>
         <s-link href="/products">Products</s-link>
         <s-link href="/channels">Channels &amp; catalogues</s-link>
+        <s-link href="/inventory">Inventory</s-link>
         <s-link href="/links">Storefront links</s-link>
         <s-link href="/check">Product check</s-link>
       </s-app-nav>

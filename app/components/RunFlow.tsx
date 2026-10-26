@@ -94,7 +94,7 @@ export function RunFlow<L>({
         : stage === "verifying"
           ? "Reading the products back from Shopify to confirm…"
           : progress
-            ? `${progress.phase === "shipping" ? "Moving shipping profiles" : progress.phase === "publishing" ? "Updating channels and catalogues" : "Updating catalogues"}… ${progress.done} of ${progress.total}`
+            ? `${progress.phase === "shipping" ? "Moving shipping profiles" : progress.phase === "publishing" ? "Updating channels and catalogues" : progress.phase === "inventory" ? "Updating inventory" : "Updating catalogues"}… ${progress.done} of ${progress.total}`
             : "Starting…";
     return (
       <s-section heading="Applying">

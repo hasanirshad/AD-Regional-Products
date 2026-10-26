@@ -11,6 +11,7 @@ export default [
     index("views/overview.tsx"),
     route("products", "views/products.tsx"),
     route("channels", "views/channels.tsx"),
+    route("inventory", "views/inventory.tsx"),
     route("links", "views/links.tsx"),
     route("check", "views/check.tsx"),
   ]),

@@ -17,7 +17,7 @@ export type MoveResult = {
   stopped: boolean;
 };
 
-export type Progress = { phase: "shipping" | "catalogues" | "publishing"; done: number; total: number };
+export type Progress = { phase: "shipping" | "catalogues" | "publishing" | "inventory"; done: number; total: number };
 
 const VARIANTS = `#graphql
   query MoveVariants($ids: [ID!]!) {

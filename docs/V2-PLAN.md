@@ -203,3 +203,5 @@ Bulk enable/disable of sales channels and add/remove of catalogues for a filtere
 Read-only page: per-market storefront links for the products you pick, for the live theme or a preview theme, with a CSV export. Needs the `read_themes` scope for the theme list (manual theme id works without it).
 
 Update 2026-10-26: the market-domain read failed on `defaultLocale` (scope). Removed it. Added typed base domain per market on the page, saved in browser localStorage only (no server). A Shopify-side store (app metafield) would need a write scope and the password, and is not built.
+
+Update 2026-10-26 (2): Inventory page added (bulk track + stop selling at 0 + set quantity, default 1). New scopes read_inventory, write_inventory, write_products. See CLAUDE.md.
