@@ -1,14 +1,14 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { FilterBar } from "../components/FilterBar";
+import { InventoryFilters, type InventoryFilterOptions } from "../components/InventoryFilters";
 import { InventoryReview } from "../components/InventoryReview";
 import { Loading } from "../components/Loading";
 import { PageBody } from "../components/PageBody";
 import { ScopeBanner } from "../components/ScopeBanner";
-import { SelectField } from "../components/SelectField";
 import { onChecked, onInput } from "../lib/dom";
-import { activeChips, ANY, applyFilters, filterOptions, NO_FILTERS, NONE } from "../lib/filter";
+import { filterOptions } from "../lib/filter";
+import { applyBaseFilters, applyStockFilters, countValues, NO_INV_FILTERS, stockNeeded } from "../lib/inventoryFilter";
 import { loadStockLocations, planStock, readStock, readStockOverview, settingsProblem, type StockLocation, type StockPlan, type StockSettings, type StockSummary } from "../lib/inventory";
-import type { Filters, ProductRow } from "../lib/types";
+import type { ProductRow } from "../lib/types";
 import { useStartProducts } from "./products-state";
 import { useAppState } from "./state";
 
@@ -25,9 +25,14 @@ type Stage = "choose" | "reading" | "review";
 // Four steps: 1 choose products, 2 choose the stock settings, 3 review (nothing written), 4 apply.
 // Typical use: every variant tracked, quantity 1, and not available once sold out.
 export default function Inventory() {
-  const { shop, products, inventoryUi: ui, refresh } = useAppState();
+  const { shop, products, inventoryUi: ui, invFilters, refresh } = useAppState();
   useStartProducts(products);
-  const { filters, setFilters, selected, setSelected, page, setPage } = ui;
+  const { selected, setSelected, page, setPage } = ui;
+  const filters = invFilters.value;
+  const setFilters = (f: typeof filters) => {
+    invFilters.set(f);
+    setPage(0);
+  };
 
   const [locations, setLocations] = useState<StockLocation[] | null>(null);
   const [locationError, setLocationError] = useState("");
@@ -63,14 +68,31 @@ export default function Inventory() {
 
   const rows = products.rows;
   const options = useMemo(() => filterOptions(rows), [rows]);
-  const filtered = useMemo(() => applyFilters(rows, filters, {}), [rows, filters]);
+  const counts = useMemo(() => countValues(rows), [rows]);
+  // Filters that need no stock first, then the ones that do (those only judge products whose stock has been read).
+  const base = useMemo(() => applyBaseFilters(rows, filters), [rows, filters]);
+  const needStock = stockNeeded(filters);
+  const stockApplied = useMemo(() => applyStockFilters(base, filters, overview), [base, filters, overview]);
+  const filtered = stockApplied.rows;
+  const panelOptions = useMemo<InventoryFilterOptions>(() => {
+    const pick = (values: string[], m: Map<string, number>) => values.map((v) => ({ value: v, label: v, count: m.get(v) }));
+    return {
+      status: options.statuses.map((s) => ({ value: s, label: STATUS_LABEL[s] ?? s })),
+      vendor: pick(options.vendors, counts.vendor),
+      productType: pick(options.types, counts.productType),
+      tag: pick(options.tags, counts.tag),
+      catalog: options.catalogs.map((c) => ({ value: c.id, label: c.title, count: counts.catalog.get(c.id) })),
+      locations: (locations ?? []).map((l) => ({ value: l.id, label: l.name })),
+    };
+  }, [options, counts, locations]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pages - 1);
   const pageRows = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
-  const pageKey = pageRows.map((p) => p.id).join(",");
+  // What to read: the products on this page, or every product the stock filters have to judge.
+  const wantedKey = (needStock ? base : pageRows).map((p) => p.id).join(",");
   useEffect(() => {
-    const missing = pageKey.split(",").filter((id) => id && !(id in overview));
+    const missing = wantedKey.split(",").filter((id) => id && !(id in overview));
     if (missing.length === 0) {
       setOverviewBusy(false);
       return;
@@ -97,15 +119,13 @@ export default function Inventory() {
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageKey, overviewNonce]);
+  }, [wantedKey, overviewNonce]);
   const refreshStock = () => {
     setOverview({});
     setOverviewNonce((n) => n + 1);
   };
 
   const pageAllSelected = pageRows.length > 0 && pageRows.every((p) => selected.has(p.id));
-  const chips = activeChips(filters, { catalogs: options.catalogs, profiles: [] });
-  const set = (patch: Partial<Filters>) => setFilters({ ...filters, ...patch });
 
   const settings: StockSettings = {
     track,
@@ -224,58 +244,19 @@ export default function Inventory() {
 
           <s-section heading="Step 1 · Choose products">
             <s-stack gap="base">
-              <FilterBar
-                search={filters.search}
-                onSearch={(search) => set({ search })}
-                placeholder="Search by title, handle, vendor, type or tag"
-                activeCount={chips.length}
-                chips={chips}
-                onRemoveChip={(key) => set({ [key]: "" } as Partial<Filters>)}
-                onClear={() => setFilters(NO_FILTERS)}
-              >
-                <SelectField
-                  label="Status"
-                  value={filters.status}
-                  onChange={(status) => set({ status })}
-                  options={[{ value: "", label: "Any status" }, ...options.statuses.map((s) => ({ value: s, label: STATUS_LABEL[s] ?? s }))]}
-                />
-                <SelectField
-                  label="Vendor"
-                  value={filters.vendor}
-                  onChange={(vendor) => set({ vendor })}
-                  options={[{ value: "", label: "Any vendor" }, ...options.vendors.map((v) => ({ value: v, label: v }))]}
-                />
-                <SelectField
-                  label="Product type"
-                  value={filters.productType}
-                  onChange={(productType) => set({ productType })}
-                  options={[{ value: "", label: "Any type" }, ...options.types.map((t) => ({ value: t, label: t }))]}
-                />
-                <SelectField
-                  label="Tag"
-                  value={filters.tag}
-                  onChange={(tag) => set({ tag })}
-                  options={[{ value: "", label: "Any tag" }, ...options.tags.map((t) => ({ value: t, label: t }))]}
-                />
-                <SelectField
-                  label="Catalogue"
-                  value={filters.catalog}
-                  onChange={(catalog) => set({ catalog })}
-                  options={[
-                    { value: "", label: "Any" },
-                    { value: NONE, label: "Not in any catalogue" },
-                    { value: ANY, label: "In any catalogue" },
-                    ...options.catalogs.map((c) => ({ value: c.id, label: c.title })),
-                  ]}
-                />
-              </FilterBar>
+              <InventoryFilters
+                filters={filters}
+                onChange={setFilters}
+                options={panelOptions}
+                stock={{ needed: needStock, remaining: stockApplied.waiting, total: base.length }}
+                shown={filtered.length}
+                total={rows.length}
+              />
 
               <s-stack direction="inline" gap="base" alignItems="center">
-                <s-text color="subdued">
-                  {filtered.length} of {rows.length} products · {selected.size} selected
-                </s-text>
+                <s-text color="subdued">{selected.size} selected</s-text>
                 {filtered.length > 0 && selected.size < filtered.length ? (
-                  <s-button variant="tertiary" onClick={() => setSelected(() => new Set(filtered.map((p) => p.id)))}>
+                  <s-button variant="tertiary" disabled={stockApplied.waiting > 0 || undefined} onClick={() => setSelected(() => new Set(filtered.map((p) => p.id)))}>
                     {`Select all ${filtered.length} matching`}
                   </s-button>
                 ) : null}
@@ -302,11 +283,13 @@ export default function Inventory() {
                 </s-banner>
               ) : null}
 
-              {filtered.length === 0 ? (
+              {filtered.length === 0 && stockApplied.waiting > 0 && !overviewError ? (
+                <Loading message="Reading the stock of the products to apply the stock filters…" />
+              ) : filtered.length === 0 ? (
                 <s-stack gap="small-100">
                   <s-paragraph>No products match these filters.</s-paragraph>
                   <div>
-                    <s-button onClick={() => setFilters(NO_FILTERS)}>Clear filters</s-button>
+                    <s-button onClick={() => setFilters(NO_INV_FILTERS)}>Clear filters</s-button>
                   </div>
                 </s-stack>
               ) : (

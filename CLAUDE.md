@@ -120,7 +120,7 @@ app/
 scripts/preload.mjs              modulepreload hints (ROUTE_IDS = views/layout, views/overview)
 public/_headers                  frame-ancestors for Shopify + immutable cache for /assets/*
 ```
-218 tests in 21 files (`app/lib/*.test.ts`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
+227 tests in 22 files (`app/lib/*.test.ts`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
 which runs the real `applyMove` / `runPlan` against a fake Shopify (incl. a silent no-op). `testkit.ts` has the builders.
 No UI tests; no test for `shopify-data` queries (they only run inside the admin).
 
@@ -193,7 +193,7 @@ Zones (30 per location group) are flagged (`zonesTruncated`).
 ## Commands
 
 `npm test` (vitest), `npm run typecheck`, `npm run build`, `npm run deploy`. Before any handoff run
-test + typecheck + build. Expected: 218 tests pass, typecheck clean.
+test + typecheck + build. Expected: 227 tests pass, typecheck clean.
 
 ## Channels & catalogues page (added 2026-10-26)
 
@@ -217,6 +217,12 @@ test + typecheck + build. Expected: 218 tests pass, typecheck clean.
 - Product list (Step 1) shows, per product, read only: **Tracked** (all / none / n of N), **When sold out** (Stops at 0 / Keeps selling / n of N),
   and **Stock by location** (every location where a variant is stocked, available total, "(n of N variants)" when partial). Read for the products on
   the current page only (2 per call, first 40 variants, 8 locations: `readStockOverview`, `summarizeStock`), cached until "Refresh stock" or after a write.
+- **Filter panel** (`components/InventoryFilters.tsx`, logic in `lib/inventoryFilter.ts`, state `invFilters` in the layout): search box + "Filters (n)" button that
+  opens a panel above the table + one removable chip per value. Several values per filter (a product matches if it has ANY chosen value; different
+  filters must ALL match). Type-and-pick lists (with counts, "Browse all"): Tag, Vendor, Product type, Catalogue, Stocked at (location). Tick boxes:
+  Status, Availability, Tracked. Number of variants: at least / at most. Availability, Tracked and Stocked-at need the stock of each product: when one is on,
+  the stock of ALL products matching the other filters is read in the background (2 per call, list fills as it goes, "Select all matching" waits).
+  Products whose stock is not read yet are left out and counted (`applyStockFilters().waiting`). Other pages still use the old `FilterBar`.
 - Also per row: the product title links to the product in Shopify admin, and an **Availability** column (Available / Sold out / n of N sold out;
   sold out = tracked, stops at 0, nothing available at any location: `StockSummary.soldOut`).
 - **Speed** (quick filter changes froze the tab): `FilterBar` keeps typing in its own box and filters 250 ms after the last key (all pages);

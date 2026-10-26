@@ -2,6 +2,7 @@
 // moves). Lives in the layout so leaving the page and coming back loses
 // nothing. Products load lazily the first time the Products page opens.
 
+import type { InvFilters } from "../lib/inventoryFilter";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NO_FILTERS } from "../lib/filter";
 import { buildParts } from "../lib/parts";
@@ -154,7 +155,7 @@ export function useProductsUi(): ProductsUi {
   );
 }
 
-export type Shared = AppState & { products: ProductsLoad; ui: ProductsUi; channelsUi: ProductsUi; linksUi: ProductsUi; checkUi: ProductsUi; inventoryUi: ProductsUi };
+export type Shared = AppState & { products: ProductsLoad; ui: ProductsUi; channelsUi: ProductsUi; linksUi: ProductsUi; checkUi: ProductsUi; inventoryUi: ProductsUi; invFilters: { value: InvFilters; set: (f: InvFilters) => void } };
 
 // Keep the effect-based starter next to the types it needs.
 export function useStartProducts(products: ProductsLoad) {

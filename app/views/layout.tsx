@@ -1,6 +1,7 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Outlet } from "react-router";
 import { Gate } from "../components/Gate";
+import { NO_INV_FILTERS, type InvFilters } from "../lib/inventoryFilter";
 import { useProductsLoad, useProductsUi, type Shared } from "./products-state";
 import { useLoadAppState } from "./state";
 
@@ -15,10 +16,11 @@ export default function Layout() {
   const linksUi = useProductsUi();
   const checkUi = useProductsUi();
   const inventoryUi = useProductsUi();
+  const [invFilters, setInvFilters] = useState<InvFilters>(NO_INV_FILTERS);
 
   const shared = useMemo<Shared | null>(
-    () => (app ? { ...app, products, ui, channelsUi, linksUi, checkUi, inventoryUi } : null),
-    [app, products, ui, channelsUi, linksUi, checkUi, inventoryUi],
+    () => (app ? { ...app, products, ui, channelsUi, linksUi, checkUi, inventoryUi, invFilters: { value: invFilters, set: setInvFilters } } : null),
+    [app, products, ui, channelsUi, linksUi, checkUi, inventoryUi, invFilters],
   );
 
   return (
