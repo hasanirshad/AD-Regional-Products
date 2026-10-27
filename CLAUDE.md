@@ -2,7 +2,7 @@
 
 Read this first in every session. It is the standing context for this repo. Keep it short and true:
 when a decision, rule or fact here changes, change this file in the same piece of work.
-Last reviewed: 2026-10-25 (v0.1.0 + safety/accuracy work after commit 4237025; see "Open work").
+Last reviewed: 2026-10-28 (Edit product + Bulk edit pages added; see "Product editor" and "Open work").
 
 ## What this is
 
@@ -20,7 +20,7 @@ The app reads live from Shopify every time. Shopify is the source of truth.
 
 ## Rules from Hasan (do not break)
 
-1. **No server, no database, nothing saved by the app.** No auto-sync, no background writes. Manual actions only.
+1. **No server, no database, nothing saved outside Shopify.** The only things the app stores are app-owned metafields inside Shopify (editor sets, pins, last-save Undo, draft step: see "Product editor"), and each save asks for the password. No auto-sync, no background writes. Manual actions only.
 2. **Reads are free. Every write asks for the password.** `lib/guard.ts` (SHA-256 of the password in the
    code; it is a guard against accidents, not security). Two layers: screens call `useGuard().ask(action)`;
    `adminGraphql` refuses any `mutation` unless it runs inside `runUnlocked()`. A new write must never
@@ -63,7 +63,7 @@ The app reads live from Shopify every time. Shopify is the source of truth.
 | Repo | GitHub `hasanirshad/AD-Regional-Products`, branch `master` |
 | Cloudflare build | `npm run build`, output `build/client`, env `SHOPIFY_API_KEY` (client id), `NODE_VERSION=22` |
 | Distribution | Custom distribution, one link = one store. Another store needs another app (`npx shopify app config link`) |
-| Scopes | `read_inventory, read_locations, read_markets, read_products, read_publications, read_shipping, read_themes, read_translations, write_inventory, write_products, write_publications, write_shipping` (**`read_themes`, `read_inventory`, `write_inventory`, `write_products` added 2026-10-26 and `read_translations` added 2026-10-27: need `npm run deploy` and approval in the store**; until then the Storefront links page asks for a theme id by hand) |
+| Scopes | `read_inventory, read_locations, read_markets, read_products, read_publications, read_shipping, read_themes, read_translations, read_locales, write_inventory, write_products, write_publications, write_shipping, write_translations` (**`read_locales` and `write_translations` added 2026-10-28 for the product editor: need `npm run deploy` and approval in the store**; **`read_themes`, `read_inventory`, `write_inventory`, `write_products` added 2026-10-26 and `read_translations` added 2026-10-27: need `npm run deploy` and approval in the store**; until then the Storefront links page asks for a theme id by hand) |
 | Admin API | `2026-07` via direct API access (`shopify:admin/api/graphql.json`), online mode |
 | Release config | `npm run deploy` (= `shopify app deploy --config production`); needed after scope/toml changes |
 
@@ -91,6 +91,7 @@ app/
     channels.tsx                 Channels & catalogues: filter + select products, enable/disable sales channels, add/remove catalogues (INCLUDES the Global market)
     links.tsx                    Storefront links (READ ONLY): per product, a link in each market's primary domain; theme picker (live / preview id); US gets stay_us=1; CSV export
     check.tsx                    Product check: one product, markets / countries / catalogues / profiles / variants
+    edit.tsx / bulk.tsx          Edit product (tabs, create wizard) and Bulk edit (table, paste). State: edit-state, bulk-state, editor-state. See "Product editor"
   components/
     RunFlow.tsx                  THE apply flow, generic over a RunEngine (confirm, password, recheck, first-product trial, read-back, CSV). Move, Unpublish fix and Channels use it
     PublishReview.tsx            review of a channel/catalogue change (inside RunFlow)
@@ -117,14 +118,15 @@ app/
     links.ts                     pickRoot (market domain), productUrl (preview_theme_id, stay_us), adminUrl, buildLinks, linksCsv (pure)
     fix.ts                       fix 1 plan, fix 2 (zones with rates only) + zoneDrift / zoneMissing / runCountryFix, fix 3 = a move
     filter.ts, dom.ts, countries.ts, hidden.ts
+    editor/                      Product editor logic (pure + tested): model, edits, changes, apply, run, read, load, settings, create, bulk, bulkLoad, mf types/rules, fake Shopify
 scripts/preload.mjs              modulepreload hints (ROUTE_IDS = views/layout, views/overview)
 scripts/check-extensions.mjs     builds each Product Insights block (esbuild), 64 KB limit, unique handle/uid/name
 extensions/                      Product Insights: 7 read-only admin blocks (Preact, own tsconfig). See "Product Insights blocks" below
 public/_headers                  frame-ancestors for Shopify + immutable cache for /assets/*
 ```
-278 tests in 26 files (`app/lib/*.test.ts` and `extensions/**/*.test.*`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
+478 tests in 39 files (`app/lib/**/*.test.ts` and `extensions/**/*.test.*`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
 which runs the real `applyMove` / `runPlan` against a fake Shopify (incl. a silent no-op). `testkit.ts` has the builders.
-No UI tests; no test for `shopify-data` queries (they only run inside the admin).
+No UI tests in the repo (the editor pages had a one-off Chromium smoke run, see `docs/PRODUCT-EDITOR.md`); no test for `shopify-data` queries (they only run inside the admin).
 
 ## Domain model (read before touching `lib/overview.ts`)
 
@@ -195,7 +197,7 @@ Zones (30 per location group) are flagged (`zonesTruncated`).
 ## Commands
 
 `npm test` (vitest), `npm run typecheck`, `npm run build`, `npm run deploy`. Before any handoff run
-test + typecheck + build. Expected: 278 tests pass, typecheck clean (`typecheck` now also checks `extensions/`). `npm run check:extensions` builds the seven blocks and checks Shopify's 64 KB limit.
+test + typecheck + build. Expected: 478 tests pass, typecheck clean (`typecheck` now also checks `extensions/`). `npm run check:extensions` builds the seven blocks and checks Shopify's 64 KB limit.
 
 ## Channels & catalogues page (added 2026-10-26)
 
@@ -279,6 +281,23 @@ with `shopify.query`. Full note (scopes, constants, API gaps, deploy, test plan)
 - Verified: typecheck, 47 new tests against a fake Shopify, `shopify app build` of all seven, a Chromium smoke run with a stub `shopify` global.
   NOT verified: any query against the real store.
 
+## Product editor: Edit product and Bulk edit (added 2026-10-28)
+
+- Routes `/edit` and `/bulk`. Full note (what each page does, scopes with reasons, test plan, unverified calls, limits):
+  `docs/PRODUCT-EDITOR.md` (also in the Hardman project as `regional-products/PRODUCT-EDITOR.md`).
+- Product first (AD MetaFields is metafield first). Every write: review, ticked confirmation, password, recheck, read-back (shared `RunFlow`).
+  Translations are typed or pasted only (no automatic translation); "copy the source into empty languages" is confirmed by a person.
+- **Storage decision (inside Shopify):** app-owned `$app` metafields. On the app installation: `editor_sets`, `editor_bookmarks`,
+  `editor_undo`. On a draft product: `draft_state` (Create product step). Chosen over "on the shop" because it needs no extra scope and is
+  shared by all staff. Saving any of them asks for the password.
+- Create product makes a real DRAFT product at step 1; it becomes ACTIVE only on the last step (review + confirmation + password).
+- Scopes added: `write_translations`, `read_locales` (run `npm run deploy`, approve in the store).
+- Editor model: everything editable is a `Target`; a pending edit holds the end value and disappears when it equals the stored one; `buildChanges`
+  → `toBundles` (one bundle per product = one RunFlow line) → `applyBundle` (product fields, handle, variants, metafields, stock, translations;
+  a failed step halts the rest for that product) → read-back. `lib/editor/fake.ts` is the fake Shopify used by the tests.
+- Gotcha: metafield drafts live in a separate map so half-typed text is never overwritten; `TextBox` attaches its own `input` and `change` listeners.
+- Unverified on the real store: see the list in `docs/PRODUCT-EDITOR.md`. Run its test plan before trusting a write.
+
 ## Open work
 
 Done on 2026-10-25 (in code, not yet pushed/verified live): C1 variant-level profiles, C2 zone rates, C3 partial fix,
@@ -286,5 +305,6 @@ W1 recheck, W2 read-back, W3 first-product trial, W4 CSV report, Product check p
 
 See the v2 plan: `docs/V2-PLAN.md` (also in the Hardman project as `regional-products/V2-PLAN.md`). First: run the canary write test
 on one product (DE-DHL product, "Unpublish from France"), then the safety and diagnosis work in the plan.
-Hasan still has to: confirm Cloudflare is green on the latest push, run `npm run deploy` if scopes change,
+Product editor (2026-10-28): built and tested against a fake Shopify only; first real-store check is the plan in `docs/PRODUCT-EDITOR.md`.
+Hasan still has to: confirm Cloudflare is green on the latest push, run `npm run deploy` (scopes changed: `write_translations`, `read_locales`),
 and install the app on the right store with the custom distribution link.

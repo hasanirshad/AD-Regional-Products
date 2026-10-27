@@ -9,6 +9,9 @@ import { buildParts } from "../lib/parts";
 import { loadMembership, loadProductsPage, PRODUCT_QUERY } from "../lib/shopify-data";
 import type { Filters, Membership, Parts, ProductCatalog, ProductRow, ProfileSummary } from "../lib/types";
 import type { AppState } from "./state";
+import type { EditorShared } from "./editor-state";
+import type { EditState } from "./edit-state";
+import type { BulkState } from "./bulk-state";
 
 export type ProductScope = "active" | "all";
 
@@ -36,6 +39,8 @@ export type ProductsLoad = {
   load: () => void;
   /** Reads everything again. */
   reload: () => void;
+  /** Updates rows in place after the editor saved them, so lists show the new titles, tags and so on without a reload. */
+  patchRows: (patches: Record<string, Partial<ProductRow>>) => void;
 };
 
 export function useProductsLoad(app: Pick<AppState, "profiles" | "hiddenCatalogIds"> | null): ProductsLoad {
@@ -110,6 +115,11 @@ export function useProductsLoad(app: Pick<AppState, "profiles" | "hiddenCatalogI
     if (status === "idle") void run();
   }, [status, run]);
 
+  const patchRows = useCallback((patches: Record<string, Partial<ProductRow>>) => {
+    if (Object.keys(patches).length === 0) return;
+    setRows((prev) => prev.map((r) => (patches[r.id] ? { ...r, ...patches[r.id] } : r)));
+  }, []);
+
   return useMemo(
     () => ({
       scope,
@@ -124,8 +134,9 @@ export function useProductsLoad(app: Pick<AppState, "profiles" | "hiddenCatalogI
       error,
       load,
       reload: () => void run(),
+      patchRows,
     }),
-    [scope, status, rows, membership, parts, notes, hiddenCatalogs, loaded, error, load, run],
+    [scope, status, rows, membership, parts, notes, hiddenCatalogs, loaded, error, load, run, patchRows],
   );
 }
 
@@ -155,7 +166,7 @@ export function useProductsUi(): ProductsUi {
   );
 }
 
-export type Shared = AppState & { products: ProductsLoad; ui: ProductsUi; channelsUi: ProductsUi; linksUi: ProductsUi; checkUi: ProductsUi; inventoryUi: ProductsUi; invFilters: { value: InvFilters; set: (f: InvFilters) => void } };
+export type Shared = AppState & { editor: EditorShared; edit: EditState; bulk: BulkState; products: ProductsLoad; ui: ProductsUi; channelsUi: ProductsUi; linksUi: ProductsUi; checkUi: ProductsUi; inventoryUi: ProductsUi; invFilters: { value: InvFilters; set: (f: InvFilters) => void } };
 
 // Keep the effect-based starter next to the types it needs.
 export function useStartProducts(products: ProductsLoad) {

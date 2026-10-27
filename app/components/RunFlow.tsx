@@ -94,7 +94,7 @@ export function RunFlow<L>({
         : stage === "verifying"
           ? "Reading the products back from Shopify to confirm…"
           : progress
-            ? `${progress.phase === "shipping" ? "Moving shipping profiles" : progress.phase === "publishing" ? "Updating channels and catalogues" : progress.phase === "inventory" ? "Updating inventory" : "Updating catalogues"}… ${progress.done} of ${progress.total}`
+            ? `${PHASE_TEXT[progress.phase] ?? "Updating"}… ${progress.done} of ${progress.total}`
             : "Starting…";
     return (
       <s-section heading="Applying">
@@ -137,7 +137,7 @@ export function RunFlow<L>({
         <s-stack gap="base">
           {guard.modal}
           <s-banner tone="success" heading="Shopify shows the change on the first product">
-            <s-paragraph>{`${rest.length} more product${rest.length === 1 ? "" : "s"} are waiting. Nothing else has been touched yet.`}</s-paragraph>
+            <s-paragraph>{`${rest.length === 1 ? "1 more product is" : `${rest.length} more products are`} waiting. Nothing else has been touched yet.`}</s-paragraph>
           </s-banner>
           <s-stack direction="inline" gap="base">
             <s-button variant="primary" onClick={() => guard.ask(() => start(rest, false, rows))}>
@@ -193,8 +193,8 @@ export function RunFlow<L>({
                 <s-table-header>What went wrong</s-table-header>
               </s-table-header-row>
               <s-table-body>
-                {bad.map((r) => (
-                  <s-table-row key={r.productId}>
+                {bad.map((r, i) => (
+                  <s-table-row key={`${r.productId}-${i}`}>
                     <s-table-cell>{r.title}</s-table-cell>
                     <s-table-cell>{r.status}</s-table-cell>
                     <s-table-cell>{r.message}</s-table-cell>
@@ -252,6 +252,14 @@ export function RunFlow<L>({
     </s-stack>
   );
 }
+
+const PHASE_TEXT: Record<string, string> = {
+  shipping: "Moving shipping profiles",
+  publishing: "Updating channels and catalogues",
+  inventory: "Updating inventory",
+  catalogues: "Updating catalogues",
+  editing: "Saving products",
+};
 
 const notApplied = <L,>(engine: RunEngine<L>, lines: L[], message: string): ReportRow[] =>
   lines.map((l) => ({
