@@ -1,0 +1,12 @@
+api_version = "2026-10"
+
+[[extensions]]
+type = "ui_extension"
+name = "Market Availability"
+handle = "insights-market-availability"
+uid = "4b0f7a52-6f0e-4b69-8e9a-3a1d5e7c1a01"
+description = "Read-only: is the product published in each market, and its price there."
+
+  [[extensions.targeting]]
+  target = "admin.product-details.block.render"
+  module = "./src/Block.tsx"

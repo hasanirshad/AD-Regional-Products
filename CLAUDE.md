@@ -63,7 +63,7 @@ The app reads live from Shopify every time. Shopify is the source of truth.
 | Repo | GitHub `hasanirshad/AD-Regional-Products`, branch `master` |
 | Cloudflare build | `npm run build`, output `build/client`, env `SHOPIFY_API_KEY` (client id), `NODE_VERSION=22` |
 | Distribution | Custom distribution, one link = one store. Another store needs another app (`npx shopify app config link`) |
-| Scopes | `read_inventory, read_locations, read_markets, read_products, read_publications, read_shipping, read_themes, write_inventory, write_products, write_publications, write_shipping` (**`read_themes`, `read_inventory`, `write_inventory`, `write_products` added 2026-10-26: need `npm run deploy` and approval in the store**; until then the Storefront links page asks for a theme id by hand) |
+| Scopes | `read_inventory, read_locations, read_markets, read_products, read_publications, read_shipping, read_themes, read_translations, write_inventory, write_products, write_publications, write_shipping` (**`read_themes`, `read_inventory`, `write_inventory`, `write_products` added 2026-10-26 and `read_translations` added 2026-10-27: need `npm run deploy` and approval in the store**; until then the Storefront links page asks for a theme id by hand) |
 | Admin API | `2026-07` via direct API access (`shopify:admin/api/graphql.json`), online mode |
 | Release config | `npm run deploy` (= `shopify app deploy --config production`); needed after scope/toml changes |
 
@@ -118,9 +118,11 @@ app/
     fix.ts                       fix 1 plan, fix 2 (zones with rates only) + zoneDrift / zoneMissing / runCountryFix, fix 3 = a move
     filter.ts, dom.ts, countries.ts, hidden.ts
 scripts/preload.mjs              modulepreload hints (ROUTE_IDS = views/layout, views/overview)
+scripts/check-extensions.mjs     builds each Product Insights block (esbuild), 64 KB limit, unique handle/uid/name
+extensions/                      Product Insights: 7 read-only admin blocks (Preact, own tsconfig). See "Product Insights blocks" below
 public/_headers                  frame-ancestors for Shopify + immutable cache for /assets/*
 ```
-231 tests in 22 files (`app/lib/*.test.ts`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
+278 tests in 26 files (`app/lib/*.test.ts` and `extensions/**/*.test.*`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
 which runs the real `applyMove` / `runPlan` against a fake Shopify (incl. a silent no-op). `testkit.ts` has the builders.
 No UI tests; no test for `shopify-data` queries (they only run inside the admin).
 
@@ -193,7 +195,7 @@ Zones (30 per location group) are flagged (`zonesTruncated`).
 ## Commands
 
 `npm test` (vitest), `npm run typecheck`, `npm run build`, `npm run deploy`. Before any handoff run
-test + typecheck + build. Expected: 231 tests pass, typecheck clean.
+test + typecheck + build. Expected: 278 tests pass, typecheck clean (`typecheck` now also checks `extensions/`). `npm run check:extensions` builds the seven blocks and checks Shopify's 64 KB limit.
 
 ## Channels & catalogues page (added 2026-10-26)
 
@@ -262,6 +264,20 @@ test + typecheck + build. Expected: 231 tests pass, typecheck clean.
 - The market that contains the United States gets `stay_us=1` (Hasan: otherwise visitors outside the US are redirected).
 - Export: CSV, one row per product and market: Product, Market, Store link, Admin link, Published in market. Admin link =
   `https://admin.shopify.com/store/<myshopify handle>/products/<id>`.
+
+## Product Insights blocks (added 2026-10-27)
+
+Seven separate **read-only** admin blocks on the product details page (target `admin.product-details.block.render`, API 2026-10,
+Preact, `s-*` components), in `extensions/`: Market Availability, Translation Status, Sale and Badge, Data Quality Checklist,
+Collections and Tags, Quick Links, Recent Activity. No server, no routes, no writes, no write scopes; they call the Admin API
+with `shopify.query`. Full note (scopes, constants, API gaps, deploy, test plan): `docs/PRODUCT-INSIGHTS.md`.
+
+- Store-specific values live only in `extensions/shared/constants.ts` (market domains, languages, sale badge and collection,
+  required metafields, preview theme id). Several are guesses marked CONFIRM; lead-time keys are not known yet (check shows "Not configured").
+- Shared code is in `extensions/shared/` (query wrapper with a read-only guard, pricing, collections, translations, UI states).
+- New scope: `read_translations` (needs `npm run deploy`, then approval when someone opens the app). New devDependencies: `preact`, `@shopify/ui-extensions`, `preact-render-to-string`.
+- Verified: typecheck, 47 new tests against a fake Shopify, `shopify app build` of all seven, a Chromium smoke run with a stub `shopify` global.
+  NOT verified: any query against the real store.
 
 ## Open work
 

@@ -1,0 +1,12 @@
+api_version = "2026-10"
+
+[[extensions]]
+type = "ui_extension"
+name = "Translation Status"
+handle = "insights-translation-status"
+uid = "9d3c1e84-2b7a-4c55-9f10-6e8a2b4d7c02"
+description = "Read-only: which fields are translated, missing or unchanged, per language."
+
+  [[extensions.targeting]]
+  target = "admin.product-details.block.render"
+  module = "./src/Block.tsx"

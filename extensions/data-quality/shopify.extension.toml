@@ -1,0 +1,12 @@
+api_version = "2026-10"
+
+[[extensions]]
+type = "ui_extension"
+name = "Data Quality Checklist"
+handle = "insights-data-quality"
+uid = "7e1a9b36-5d24-4f8c-a3b0-1c6f8d2e4a04"
+description = "Read-only pass/fail checks: images, alt text, variant titles, metafields, SEO, price, markets."
+
+  [[extensions.targeting]]
+  target = "admin.product-details.block.render"
+  module = "./src/Block.tsx"

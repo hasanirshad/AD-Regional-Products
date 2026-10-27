@@ -1,0 +1,12 @@
+api_version = "2026-10"
+
+[[extensions]]
+type = "ui_extension"
+name = "Collections and Tags"
+handle = "insights-collections-tags"
+uid = "c5b2d8f7-3e61-4a90-8d47-9a0e1b6c3f05"
+description = "Read-only: every collection (manual or automated, with admin links) and every tag."
+
+  [[extensions.targeting]]
+  target = "admin.product-details.block.render"
+  module = "./src/Block.tsx"

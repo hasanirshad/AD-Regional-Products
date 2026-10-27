@@ -1,0 +1,12 @@
+api_version = "2026-10"
+
+[[extensions]]
+type = "ui_extension"
+name = "Sale and Badge"
+handle = "insights-sale-badge"
+uid = "2c8e5f13-7a49-4d02-b6c1-0f3d9a8e5b03"
+description = "Read-only: compare-at vs price per market, sale collection and sale badge with translations."
+
+  [[extensions.targeting]]
+  target = "admin.product-details.block.render"
+  module = "./src/Block.tsx"

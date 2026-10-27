@@ -1,0 +1,12 @@
+api_version = "2026-10"
+
+[[extensions]]
+type = "ui_extension"
+name = "Recent Activity"
+handle = "insights-recent-activity"
+uid = "a6d9f2c1-4b78-4e05-9c3a-7f1e8b0d5a07"
+description = "Read-only: last updated time and recent product timeline events."
+
+  [[extensions.targeting]]
+  target = "admin.product-details.block.render"
+  module = "./src/Block.tsx"

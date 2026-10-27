@@ -7,3 +7,5 @@ build
 *.log
 .DS_Store
 desktop.ini
+extensions/*/dist
+extensions/*/manifest.json

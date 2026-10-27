@@ -1,0 +1,12 @@
+api_version = "2026-10"
+
+[[extensions]]
+type = "ui_extension"
+name = "Quick Links"
+handle = "insights-quick-links"
+uid = "e0a4c7b9-8f12-4d36-a5e8-2b9d6f1c7a06"
+description = "Links to the product on every storefront domain, the preview theme and its orders."
+
+  [[extensions.targeting]]
+  target = "admin.product-details.block.render"
+  module = "./src/Block.tsx"
