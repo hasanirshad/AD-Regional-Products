@@ -234,7 +234,7 @@ export function useBulkState(shared: EditorShared, products: ProductsLoad): Bulk
   );
 
   const noVariant = useCallback(
-    (col: Column, productId: string): boolean => col.group === "Prices" && cache.current.variantIds.has(productId) && cache.current.variantIds.get(productId) === null,
+    (col: Column, productId: string): boolean => col.group === "Variant" && cache.current.variantIds.has(productId) && cache.current.variantIds.get(productId) === null,
     [version], // eslint-disable-line react-hooks/exhaustive-deps
   );
 

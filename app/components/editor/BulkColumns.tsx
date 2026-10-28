@@ -1,17 +1,16 @@
 import { useMemo, useState } from "react";
-import { PRODUCT_COLUMN_FIELDS, TRANSLATABLE_FIELDS, metafieldColumn, priceColumn, productColumn, translationColumn, type Column } from "../../lib/editor/bulk";
+import { PRODUCT_COLUMN_FIELDS, TRANSLATABLE_FIELDS, VARIANT_COLUMN_FIELDS, metafieldColumn, productColumn, translationColumn, variantColumn, type Column } from "../../lib/editor/bulk";
 import type { Definition } from "../../lib/editor/load";
 import type { Slot } from "../../lib/editor/locales";
 import { onChecked } from "../../lib/dom";
 import { Dialog } from "./Dialog";
 import { TextBox } from "./TextBox";
 
-/** Everything that can be a column: product fields, prices, a translation of a field in a language, a product metafield. */
+/** Everything that can be a column: product fields, variant fields, a translation of a field in a language, a product metafield. */
 export function allColumns(defs: Definition[], slots: Slot[]): Column[] {
   return [
     ...PRODUCT_COLUMN_FIELDS.map(productColumn),
-    priceColumn("price"),
-    priceColumn("compareAtPrice"),
+    ...VARIANT_COLUMN_FIELDS.map(variantColumn),
     ...slots.flatMap((s) => TRANSLATABLE_FIELDS.map((f) => translationColumn(f, s.key, s.label))),
     ...defs.map(metafieldColumn),
   ];
@@ -64,7 +63,7 @@ export function ColumnChooser({ columns, defs, slots, onDone, onClose }: { colum
       <s-stack gap="base">
         <TextBox label="Search columns" value={search} onChange={setSearch} placeholder="For example SEO, French, material" />
         {section("Product", candidates.filter((c) => c.group === "Product"))}
-        {section("Prices", candidates.filter((c) => c.group === "Prices"), "Prices of your primary market, for products with one variant.")}
+        {section("Variant fields", candidates.filter((c) => c.group === "Variant"), "Price and compare-at price of your primary market, SKU and barcode. Only for products with one variant.")}
         {slots.length > 0 ? section("Translations", candidates.filter((c) => c.group === "Translations"), "Type or paste the text. Nothing is translated for you.") : null}
         {section("Product metafields", candidates.filter((c) => c.group === "Metafields"), "Single values can be edited here. Lists and other types are shown only: edit them on Edit product.")}
       </s-stack>

@@ -12,7 +12,7 @@ import { formatValue, inlineToStored, isInlineType, storedToInline, typeLabel } 
 import { PRODUCT_FIELD_LABEL, STATUS_LABEL, VARIANT_FIELD_LABEL, type ProductField, type Target, type Value, type VariantField, PRODUCT_TRANSLATION_KEY } from "./model";
 import type { ProductRow } from "../types";
 
-export type ColumnGroup = "Product" | "Prices" | "Metafields" | "Translations";
+export type ColumnGroup = "Product" | "Variant" | "Metafields" | "Translations";
 export type CellInput = "text" | "longtext" | "tags" | "status" | "price" | "metafield";
 
 export type Column = {
@@ -25,7 +25,7 @@ export type Column = {
   note?: string;
   /** product column, and the source field of a translation column */
   field?: ProductField;
-  /** price column */
+  /** variant column (price, compare-at price, SKU, barcode) */
   variantField?: VariantField;
   /** metafield column */
   namespace?: string;
@@ -72,17 +72,23 @@ export function productColumn(field: ProductField): Column {
   };
 }
 
-export function priceColumn(variantField: "price" | "compareAtPrice"): Column {
+/** The variant fields that can be edited in the table. They apply to products with exactly one variant. */
+export const VARIANT_COLUMN_FIELDS = ["price", "compareAtPrice", "sku", "barcode"] as const;
+export type VariantColumnField = (typeof VARIANT_COLUMN_FIELDS)[number];
+
+export function variantColumn(variantField: VariantColumnField): Column {
   return {
     id: `v:${variantField}`,
     label: VARIANT_FIELD_LABEL[variantField],
-    group: "Prices",
-    input: "price",
+    group: "Variant",
+    input: variantField === "price" || variantField === "compareAtPrice" ? "price" : "text",
     editable: true,
     variantField,
     note: "Only for products with one variant. Others are edited on Edit product.",
   };
 }
+
+export const priceColumn = (variantField: "price" | "compareAtPrice"): Column => variantColumn(variantField);
 
 export function metafieldColumn(def: Pick<Definition, "namespace" | "key" | "name" | "type" | "validations">): Column {
   const editable = isInlineType(def.type);
@@ -116,7 +122,7 @@ export function translationColumn(field: ProductField, slot: string, slotLabel: 
 /** The target a column edits on a product. Null when the column does not apply (a price on a product with several variants). */
 export function targetOf(col: Column, productId: string, variantId: string | null): Target | null {
   if (col.group === "Product" && col.field) return { kind: "product", productId, field: col.field };
-  if (col.group === "Prices" && col.variantField) return variantId ? { kind: "variant", productId, variantId, field: col.variantField } : null;
+  if (col.group === "Variant" && col.variantField) return variantId ? { kind: "variant", productId, variantId, field: col.variantField } : null;
   if (col.group === "Metafields" && col.namespace && col.key && col.mfType) {
     return { kind: "metafield", productId, ownerId: productId, ownerKind: "PRODUCT", namespace: col.namespace, key: col.key, type: col.mfType };
   }

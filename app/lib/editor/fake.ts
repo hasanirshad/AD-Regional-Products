@@ -395,7 +395,11 @@ export class FakeShopify {
           const value = this.appData.get(this.installationId)?.get(key);
           return value === undefined ? null : { value };
         };
-        return { currentAppInstallation: { id: this.installationId, sets: mf("editor_sets"), bookmarks: mf("editor_bookmarks"), undo: mf("editor_undo") } };
+        return { currentAppInstallation: { id: this.installationId, sets: mf("editor_sets"), bookmarks: mf("editor_bookmarks"), undo: mf("editor_undo"), blocks: mf("block_settings") } };
+      }
+      case "BlockSettingsRead": {
+        const value = this.appData.get(this.installationId)?.get("block_settings");
+        return { currentAppInstallation: { id: this.installationId, blocks: value === undefined ? null : { value } } };
       }
       case "EditorSaveSetting": {
         for (const m of vars.metafields as { ownerId: string; namespace: string; key: string; value: string }[]) {

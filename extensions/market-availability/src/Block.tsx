@@ -20,7 +20,7 @@ export function View({ data }: { data: Data }) {
       {missing.length ? (
         <Note tone="warning" heading={`Not published in ${missing.map((r) => r.def.key).join(", ")}`}>
           {missing.some((r) => r.state === "no-market")
-            ? "A market could not be matched to its country. Check the markets list in the constants file."
+            ? "A market could not be matched to its country. Check the markets list on the Settings page of the app."
             : "These markets do not show this product."}
         </Note>
       ) : null}

@@ -1,6 +1,7 @@
-import { HIDDEN_MARKETS, MARKETS, type MarketDef } from "../../shared/constants";
+import { HIDDEN_MARKETS, type MarketDef } from "../../shared/constants";
 import { withPricing, type MarketPrice } from "../../shared/pricing";
-import type { LoadContext } from "../../shared/index";
+import type { LoadContext } from "../../shared/query";
+import { defaultSettings, marketCountries, marketDefs, settingsOf } from "../../shared/settings";
 
 type RawMarket = {
   id: string;
@@ -58,9 +59,9 @@ export function findMarket(def: MarketDef, markets: RawMarket[]): RawMarket | nu
   return visible.find((m) => m.conditions?.regionsCondition?.regions?.nodes.some((r) => r.code === def.country)) ?? null;
 }
 
-export function shape(raw: Raw, prices: Record<string, MarketPrice | null>, note: string | null): Data {
+export function shape(raw: Raw, prices: Record<string, MarketPrice | null>, note: string | null, defs: MarketDef[] = marketDefs(defaultSettings())): Data {
   const publishedCatalogs = new Set((raw.product?.resourcePublicationsV2?.nodes ?? []).map((n) => n.publication?.catalog?.id).filter((x): x is string => !!x));
-  const rows = MARKETS.map((def): MarketRow => {
+  const rows = defs.map((def): MarketRow => {
     const market = findMarket(def, raw.markets.nodes);
     const catalogIds = market?.catalogs?.nodes.map((c) => c.id) ?? [];
     const state: PublishState = !market ? "no-market" : catalogIds.some((id) => publishedCatalogs.has(id)) ? "published" : "not-published";
@@ -69,10 +70,12 @@ export function shape(raw: Raw, prices: Record<string, MarketPrice | null>, note
   return { productStatus: raw.product?.status ?? "", rows, note };
 }
 
-export async function load({ productId, q }: LoadContext): Promise<Data> {
-  const countries = MARKETS.map((m) => m.country);
+export async function load(ctx: LoadContext): Promise<Data> {
+  const { productId, q } = ctx;
+  const defs = marketDefs(settingsOf(ctx));
+  const countries = marketCountries(defs);
   const { result, pricing } = await withPricing(q, productId, countries, (selection) => q<Raw>(query(selection), { id: productId }));
   if (!result.product) throw new Error("Product not found");
-  return shape(result, pricing.prices, pricing.note);
+  return shape(result, pricing.prices, pricing.note, defs);
 }
 

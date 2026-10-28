@@ -1,6 +1,6 @@
-import { EVENTS_LIMIT } from "../../shared/constants";
 import { plainText } from "../../shared/format";
-import type { LoadContext } from "../../shared/graphql";
+import type { LoadContext } from "../../shared/query";
+import { settingsOf } from "../../shared/settings";
 
 export type EventRow = { id: string; when: string; text: string; who: string };
 export type Data = { updatedAt: string | null; events: EventRow[] };
@@ -33,8 +33,10 @@ export function shape(updatedAt: string | null, raw: RawEvent[]): Data {
   return { updatedAt, events };
 }
 
-export async function load({ productId, q }: LoadContext): Promise<Data> {
-  const d = await q<{ product: { updatedAt: string; events: { nodes: RawEvent[] } } | null }>(QUERY, { id: productId, first: EVENTS_LIMIT });
+export async function load(ctx: LoadContext): Promise<Data> {
+  const { productId, q } = ctx;
+  const first = settingsOf(ctx).activity.eventsLimit;
+  const d = await q<{ product: { updatedAt: string; events: { nodes: RawEvent[] } } | null }>(QUERY, { id: productId, first });
   if (!d.product) throw new Error("Product not found");
   return shape(d.product.updatedAt, d.product.events.nodes);
 }

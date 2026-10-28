@@ -6,3 +6,4 @@ export * from "./admin";
 export * from "./ui";
 export * from "./translations";
 export * from "./collections";
+export * from "./settings";

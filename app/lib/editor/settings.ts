@@ -5,12 +5,14 @@
 //     editor_sets       named choices of metafield rows ("Dining table content")
 //     editor_bookmarks  products pinned in the picker
 //     editor_undo       the last save, so it can be undone even after a reload
+//     block_settings    the settings of the Product Insights blocks (written by the Settings page, read by the blocks)
 //   on a draft product
 //     draft_state       the step reached in "Create product" and the metafield rows chosen there
 //
 // Uninstalling the app deletes the installation metafields (the products and their drafts stay).
 // Reading is free. Saving is a mutation, so it asks for the password like every other write.
 
+import { parseSettings, SETTINGS_KEY as BLOCKS_KEY, type ParseResult } from "../../../extensions/shared/settings";
 import { formatUserErrors, type Gql, type UserError } from "./gql";
 import type { Change, Target, Value } from "./model";
 
@@ -146,17 +148,28 @@ export const SETTINGS_QUERY = `#graphql
       sets: metafield(namespace: "${NAMESPACE}", key: "${SETS_KEY}") { value }
       bookmarks: metafield(namespace: "${NAMESPACE}", key: "${BOOKMARKS_KEY}") { value }
       undo: metafield(namespace: "${NAMESPACE}", key: "${UNDO_KEY}") { value }
+      blocks: metafield(namespace: "${NAMESPACE}", key: "${BLOCKS_KEY}") { value }
     }
   }`;
 
-export type Settings = { installationId: string; sets: SavedSet[]; bookmarks: Bookmark[]; undo: UndoRecord | null };
+export type Settings = {
+  installationId: string;
+  sets: SavedSet[];
+  bookmarks: Bookmark[];
+  undo: UndoRecord | null;
+  /** The settings of the Product Insights blocks, checked (a broken value gives the defaults). */
+  blocks: ParseResult;
+  /** The stored text, to notice when someone else saved. */
+  blocksRaw: string | null;
+};
 
 export async function loadSettings(gql: Gql): Promise<Settings> {
   const data = await gql<{
-    currentAppInstallation: { id: string; sets: { value: string } | null; bookmarks: { value: string } | null; undo: { value: string } | null };
+    currentAppInstallation: { id: string; sets: { value: string } | null; bookmarks: { value: string } | null; undo: { value: string } | null; blocks?: { value: string } | null };
   }>(SETTINGS_QUERY);
   const i = data.currentAppInstallation;
-  return { installationId: i.id, sets: parseSets(i.sets?.value), bookmarks: parseBookmarks(i.bookmarks?.value), undo: parseUndo(i.undo?.value) };
+  const blocksRaw = i.blocks?.value ?? null;
+  return { installationId: i.id, sets: parseSets(i.sets?.value), bookmarks: parseBookmarks(i.bookmarks?.value), undo: parseUndo(i.undo?.value), blocks: parseSettings(blocksRaw), blocksRaw };
 }
 
 // ---------------------------------------------------------------- writing (needs the password)

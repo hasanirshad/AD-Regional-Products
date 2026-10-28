@@ -92,6 +92,7 @@ app/
     links.tsx                    Storefront links (READ ONLY): per product, a link in each market's primary domain; theme picker (live / preview id); US gets stay_us=1; CSV export
     check.tsx                    Product check: one product, markets / countries / catalogues / profiles / variants
     edit.tsx / bulk.tsx          Edit product (tabs, create wizard) and Bulk edit (table, paste). State: edit-state, bulk-state, editor-state. See "Product editor"
+    settings.tsx                 Block settings: a tab per block + Market adaptations, review + password save, reset, preview. See "Block settings"
   components/
     RunFlow.tsx                  THE apply flow, generic over a RunEngine (confirm, password, recheck, first-product trial, read-back, CSV). Move, Unpublish fix and Channels use it
     PublishReview.tsx            review of a channel/catalogue change (inside RunFlow)
@@ -118,13 +119,14 @@ app/
     links.ts                     pickRoot (market domain), productUrl (preview_theme_id, stay_us), adminUrl, buildLinks, linksCsv (pure)
     fix.ts                       fix 1 plan, fix 2 (zones with rates only) + zoneDrift / zoneMissing / runCountryFix, fix 3 = a move
     filter.ts, dom.ts, countries.ts, hidden.ts
-    editor/                      Product editor logic (pure + tested): model, edits, changes, apply, run, read, load, settings, create, bulk, bulkLoad, mf types/rules, fake Shopify
+    editor/                      Product editor logic (pure + tested): model, edits, changes, apply, run, read, load, settings, create, bulk, bulkLoad, mf types/rules, fake Shopify,
+                                 blockSettings (tabs, reset, diff, guarded save), blockPreview (preview of a block on sample data), locales (slots + adaptations)
 scripts/preload.mjs              modulepreload hints (ROUTE_IDS = views/layout, views/overview)
 scripts/check-extensions.mjs     builds each Product Insights block (esbuild), 64 KB limit, unique handle/uid/name
 extensions/                      Product Insights: 7 read-only admin blocks (Preact, own tsconfig). See "Product Insights blocks" below
 public/_headers                  frame-ancestors for Shopify + immutable cache for /assets/*
 ```
-478 tests in 39 files (`app/lib/**/*.test.ts` and `extensions/**/*.test.*`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
+553 tests in 43 files (`app/lib/**/*.test.ts` and `extensions/**/*.test.*`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
 which runs the real `applyMove` / `runPlan` against a fake Shopify (incl. a silent no-op). `testkit.ts` has the builders.
 No UI tests in the repo (the editor pages had a one-off Chromium smoke run, see `docs/PRODUCT-EDITOR.md`); no test for `shopify-data` queries (they only run inside the admin).
 
@@ -274,8 +276,9 @@ Preact, `s-*` components), in `extensions/`: Market Availability, Translation St
 Collections and Tags, Quick Links, Recent Activity. No server, no routes, no writes, no write scopes; they call the Admin API
 with `shopify.query`. Full note (scopes, constants, API gaps, deploy, test plan): `docs/PRODUCT-INSIGHTS.md`.
 
-- Store-specific values live only in `extensions/shared/constants.ts` (market domains, languages, sale badge and collection,
-  required metafields, preview theme id). Several are guesses marked CONFIRM; lead-time keys are not known yet (check shows "Not configured").
+- `extensions/shared/constants.ts` now holds the DEFAULTS (market domains, languages, sale badge and collection, required metafields,
+  preview theme id); the Block settings page overrides them. Several are guesses marked CONFIRM; lead-time keys are not known yet
+  (set them on the Block settings page, Data quality tab; until then the check shows "Not configured").
 - Shared code is in `extensions/shared/` (query wrapper with a read-only guard, pricing, collections, translations, UI states).
 - New scope: `read_translations` (needs `npm run deploy`, then approval when someone opens the app). New devDependencies: `preact`, `@shopify/ui-extensions`, `preact-render-to-string`.
 - Verified: typecheck, 47 new tests against a fake Shopify, `shopify app build` of all seven, a Chromium smoke run with a stub `shopify` global.
@@ -297,6 +300,23 @@ with `shopify.query`. Full note (scopes, constants, API gaps, deploy, test plan)
   a failed step halts the rest for that product) → read-back. `lib/editor/fake.ts` is the fake Shopify used by the tests.
 - Gotcha: metafield drafts live in a separate map so half-typed text is never overwritten; `TextBox` attaches its own `input` and `change` listeners.
 - Unverified on the real store: see the list in `docs/PRODUCT-EDITOR.md`. Run its test plan before trusting a write.
+
+## Block settings and market adaptations (added 2026-10-28)
+
+- Route `/settings` (nav "Block settings"). Full note: `docs/BLOCK-SETTINGS.md` (also in the Hardman project as `regional-products/BLOCK-SETTINGS.md`).
+- **Storage decision:** ONE json app-owned metafield `$app` / `block_settings` on the **app installation** (not on the shop: same place as the editor's
+  sets, no extra scope, shared by all staff). No metafield definition (not needed for an installation metafield); the shape is checked by the app.
+- The shape, defaults (from `extensions/shared/constants.ts`), value rules and the reader are in `extensions/shared/settings.ts`, imported by the blocks
+  AND the app. Missing / invalid data falls back to the defaults per section; a failed read means defaults plus a grey line in the block.
+  Blocks read it in `defineBlock` and get `ctx.settings`; changes show on the next load of the product page.
+- Saving: review (plain-words diff) -> ticked confirmation -> password (`useGuard`) -> recheck that nobody else saved -> `metafieldsSet` -> read back.
+  Metafield keys must be real definitions: a key set NOW that is not one blocks the save; a key already saved (or a default) is only a warning.
+- Market adaptations: `adaptations` in the same value; `slotsWithAdaptations` adds slots `locale@marketGid` to Edit product and Bulk edit (needs the
+  settings and the markets read first: `shared.ready`). Deleted markets and dropped languages are hidden; saved texts stay in Shopify.
+- `shared.settings` (the editor's `loadSettings`) now also reads `blocks`/`blocksRaw`. `useEditorShared(marketIds)` takes the market ids from the layout.
+- Bulk edit also has SKU and barcode columns (one-variant products). Edit product already edited SKU and translated handles.
+- Unverified on the real store: the `$app` read from an admin block, `json` metafield write on the installation, a market adaptation of the main language,
+  the Polaris components (smoke run stubbed them). See "Not verified" in `docs/BLOCK-SETTINGS.md`.
 
 ## Open work
 

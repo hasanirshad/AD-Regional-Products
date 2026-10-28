@@ -1,5 +1,5 @@
 // Addresses for links. Built from the shop's myshopify domain (asked for inside each block's own query).
-import { numericId } from "./graphql";
+import { numericId } from "./pure";
 
 export const shopHandle = (myshopifyDomain: string) => myshopifyDomain.replace(/\.myshopify\.com$/, "");
 export const adminBase = (handle: string) => `https://admin.shopify.com/store/${handle}`;

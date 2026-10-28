@@ -1,6 +1,8 @@
-import { MARKETS, PREVIEW_MARKET_KEY, PREVIEW_THEME_ID, type MarketDef } from "../../shared/constants";
+import type { MarketDef } from "../../shared/constants";
 import { adminBase, shopHandle } from "../../shared/admin";
-import { numericId, type LoadContext } from "../../shared/graphql";
+import { numericId } from "../../shared/pure";
+import type { LoadContext } from "../../shared/query";
+import { defaultSettings, marketDefs, settingsOf } from "../../shared/settings";
 
 export type Link = { key: string; label: string; url: string };
 export type Data = { status: string; storefront: Link[]; preview: Link | null; orders: Link; adminProduct: string };
@@ -16,9 +18,10 @@ export function storefrontUrl(def: Pick<MarketDef, "domain" | "stayUs">, handle:
 }
 
 export function buildLinks(input: { handle: string; status: string; shop: string; productId: string; themeId?: string; markets?: MarketDef[]; previewKey?: string }): Data {
-  const markets = input.markets ?? MARKETS;
-  const themeId = input.themeId ?? PREVIEW_THEME_ID;
-  const previewDef = markets.find((m) => m.key === (input.previewKey ?? PREVIEW_MARKET_KEY)) ?? markets[0];
+  const defaults = defaultSettings();
+  const markets = input.markets ?? marketDefs(defaults);
+  const themeId = input.themeId ?? defaults.links.previewThemeId;
+  const previewDef = markets.find((m) => m.key === (input.previewKey ?? defaults.links.previewMarket)) ?? markets[0];
   const base = adminBase(input.shop);
   const id = numericId(input.productId);
   return {
@@ -30,8 +33,10 @@ export function buildLinks(input: { handle: string; status: string; shop: string
   };
 }
 
-export async function load({ productId, q }: LoadContext): Promise<Data> {
+export async function load(ctx: LoadContext): Promise<Data> {
+  const { productId, q } = ctx;
+  const settings = settingsOf(ctx);
   const d = await q<{ shop: { myshopifyDomain: string }; product: { handle: string; status: string } | null }>(QUERY, { id: productId });
   if (!d.product) throw new Error("Product not found");
-  return buildLinks({ handle: d.product.handle, status: d.product.status, shop: shopHandle(d.shop.myshopifyDomain), productId });
+  return buildLinks({ handle: d.product.handle, status: d.product.status, shop: shopHandle(d.shop.myshopifyDomain), productId, themeId: settings.links.previewThemeId, markets: marketDefs(settings), previewKey: settings.links.previewMarket });
 }

@@ -136,7 +136,7 @@ export default function BulkEdit() {
                 <s-text color="subdued">{columns.map((c) => c.label).join(" · ") || "None"}</s-text>
               </s-stack>
               <s-stack direction="inline" gap="small-200">
-                <s-button disabled={shared.productDefs.status === "loading" || shared.info.status === "loading" || undefined} onClick={() => setChoosing(true)}>
+                <s-button disabled={shared.productDefs.status === "loading" || (!shared.ready && shared.info.status !== "error") || undefined} onClick={() => setChoosing(true)}>
                   Choose columns
                 </s-button>
                 <s-button disabled={columns.length === 0 || bulk.rows.length === 0 || undefined} onClick={() => setPasting(true)}>

@@ -13,6 +13,7 @@ import {
   parseTsv,
   planPaste,
   priceColumn,
+  variantColumn,
   productColumn,
   sortRows,
   tableToTsv,
@@ -49,6 +50,8 @@ describe("columns and targets", () => {
     expect(targetOf(productColumn("title"), P, null)).toEqual({ kind: "product", productId: P, field: "title" });
     expect(targetOf(priceColumn("price"), P, null)).toBeNull();
     expect(targetOf(priceColumn("price"), P, "v1")).toMatchObject({ kind: "variant", variantId: "v1", field: "price" });
+    expect(targetOf(variantColumn("sku"), P, "v1")).toMatchObject({ kind: "variant", variantId: "v1", field: "sku" });
+    expect(targetOf(variantColumn("sku"), P, null)).toBeNull();
     expect(targetOf(translationColumn("descriptionHtml", "fr", "French"), P, null)).toMatchObject({ kind: "translation", field: "body_html", slot: "fr", resourceId: P });
     expect(targetOf(metafieldColumn(def("single_line_text_field")), P, null)).toMatchObject({ kind: "metafield", ownerKind: "PRODUCT", key: "material" });
   });
@@ -76,6 +79,10 @@ describe("cells", () => {
     expect(parseCell(priceColumn("price"), "49,9")).toEqual({ value: "49.9" });
     expect(parseCell(priceColumn("price"), "abc").error).toContain("is not a price");
     expect(parseCell(priceColumn("compareAtPrice"), "").value).toBeNull();
+    // SKU and barcode are plain text, and an empty cell clears them
+    expect(parseCell(variantColumn("sku"), "  OT-180 ")).toEqual({ value: "OT-180" });
+    expect(parseCell(variantColumn("sku"), "").value).toBeNull();
+    expect(variantColumn("barcode")).toMatchObject({ group: "Variant", input: "text", variantField: "barcode" });
   });
 
   it("normalises price text from other countries", () => {

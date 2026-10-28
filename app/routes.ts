@@ -16,5 +16,6 @@ export default [
     route("check", "views/check.tsx"),
     route("edit", "views/edit.tsx"),
     route("bulk", "views/bulk.tsx"),
+    route("settings", "views/settings.tsx"),
   ]),
 ] satisfies RouteConfig;

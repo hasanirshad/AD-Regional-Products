@@ -1,14 +1,15 @@
-import { defineBlock, formatPercentRange, formatRange, LANGUAGES, Muted, Note, Pill, SALE_BADGE, SALE_COLLECTION_HANDLE, Section, Table, TranslationPill, plural } from "../../shared/index";
+import { defineBlock, formatPercentRange, formatRange, Muted, Note, Pill, Section, Table, TranslationPill, plural } from "../../shared/index";
 import { load, type Data } from "./logic";
 
 export function View({ data }: { data: Data }) {
   const salesIn = data.rows.filter((r) => r.onSale);
   const anySale = salesIn.length > 0;
+  const { badgeNamespace, badgeKey, collectionHandle, languages } = data.config;
   const warnings: string[] = [];
   if (anySale && salesIn.length < data.rows.length) warnings.push(`Sale prices exist in ${salesIn.map((r) => r.def.key).join(", ")} only.`);
-  if (anySale && !data.inSaleCollection && data.collectionsComplete) warnings.push(`On sale, but not in the "${SALE_COLLECTION_HANDLE}" collection.`);
-  if (!anySale && data.inSaleCollection) warnings.push(`In the "${SALE_COLLECTION_HANDLE}" collection, but no market has a compare-at price.`);
-  if (anySale && !data.badge.value) warnings.push(`On sale, but the ${SALE_BADGE.namespace}.${SALE_BADGE.key} badge is empty.`);
+  if (collectionHandle && anySale && !data.inSaleCollection && data.collectionsComplete) warnings.push(`On sale, but not in the "${collectionHandle}" collection.`);
+  if (collectionHandle && !anySale && data.inSaleCollection) warnings.push(`In the "${collectionHandle}" collection, but no market has a compare-at price.`);
+  if (anySale && !data.badge.value) warnings.push(`On sale, but the ${badgeNamespace}.${badgeKey} badge is empty.`);
   if (!anySale && data.badge.value) warnings.push(`Badge "${data.badge.value}" is set, but no market is on sale.`);
 
   return (
@@ -30,17 +31,19 @@ export function View({ data }: { data: Data }) {
           ],
         }))}
       />
-      <Section title="Sale collection">
-        {data.inSaleCollection ? (
-          <Pill tone="success">In "{SALE_COLLECTION_HANDLE}"</Pill>
-        ) : (
-          <Pill tone="neutral">Not in "{SALE_COLLECTION_HANDLE}"{data.collectionsComplete ? "" : " (more collections not read)"}</Pill>
-        )}
-      </Section>
-      <Section title={`Badge (${SALE_BADGE.namespace}.${SALE_BADGE.key})`}>
+      {collectionHandle ? (
+        <Section title="Sale collection">
+          {data.inSaleCollection ? (
+            <Pill tone="success">In "{collectionHandle}"</Pill>
+          ) : (
+            <Pill tone="neutral">Not in "{collectionHandle}"{data.collectionsComplete ? "" : " (more collections not read)"}</Pill>
+          )}
+        </Section>
+      ) : null}
+      <Section title={`Badge (${badgeNamespace}.${badgeKey})`}>
         {data.badge.value ? <s-text type="strong">{data.badge.value}</s-text> : <Muted>No badge set.</Muted>}
         {data.badge.value && data.badge.translations ? (
-          <Table headers={["Language", "Translation"]} rows={LANGUAGES.map((l) => ({ key: l.code, cells: [l.label, <TranslationPill cell={data.badge.translations![l.code]!} />] }))} />
+          <Table headers={["Language", "Translation"]} rows={languages.map((l) => ({ key: l.code, cells: [l.label, <TranslationPill cell={data.badge.translations![l.code]!} />] }))} />
         ) : null}
         {data.badge.value && data.badge.translationError ? <Muted>Translations could not be read: {data.badge.translationError.message}</Muted> : null}
       </Section>

@@ -173,7 +173,7 @@ export default function EditProduct() {
           <s-stack gap="base">
             <s-text color="subdued">Create a product in steps. It stays a draft until you finish the last step and confirm. You can stop at any step.</s-text>
             <s-stack direction="inline" gap="small-200">
-              <s-button disabled={shared.info.status !== "ready" || undefined} onClick={() => setStarting(true)}>
+              <s-button disabled={!shared.ready || undefined} onClick={() => setStarting(true)}>
                 Create product
               </s-button>
               <s-button disabled={drafts.status === "loading" || undefined} onClick={() => void loadDrafts()}>

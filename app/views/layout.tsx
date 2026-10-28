@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import type { BlockSettings } from "../../extensions/shared/settings";
 import { Outlet } from "react-router";
 import { Gate } from "../components/Gate";
 import { NO_INV_FILTERS, type InvFilters } from "../lib/inventoryFilter";
@@ -20,13 +21,15 @@ export default function Layout() {
   const checkUi = useProductsUi();
   const inventoryUi = useProductsUi();
   const [invFilters, setInvFilters] = useState<InvFilters>(NO_INV_FILTERS);
-  const editor = useEditorShared();
+  const [blockDraft, setBlockDraft] = useState<BlockSettings | null>(null);
+  const marketIds = useMemo(() => (app ? app.markets.map((m) => m.id) : null), [app]);
+  const editor = useEditorShared(marketIds);
   const edit = useEditState(editor);
   const bulk = useBulkState(editor, products);
 
   const shared = useMemo<Shared | null>(
-    () => (app ? { ...app, products, ui, channelsUi, linksUi, checkUi, inventoryUi, invFilters: { value: invFilters, set: setInvFilters }, editor, edit, bulk } : null),
-    [app, products, ui, channelsUi, linksUi, checkUi, inventoryUi, invFilters, editor, edit, bulk],
+    () => (app ? { ...app, products, ui, channelsUi, linksUi, checkUi, inventoryUi, invFilters: { value: invFilters, set: setInvFilters }, blockDraft: { value: blockDraft, set: setBlockDraft }, editor, edit, bulk } : null),
+    [app, products, ui, channelsUi, linksUi, checkUi, inventoryUi, invFilters, blockDraft, editor, edit, bulk],
   );
 
   return (
@@ -40,6 +43,7 @@ export default function Layout() {
         <s-link href="/check">Product check</s-link>
         <s-link href="/edit">Edit product</s-link>
         <s-link href="/bulk">Bulk edit</s-link>
+        <s-link href="/settings">Block settings</s-link>
       </s-app-nav>
       <Gate
         status={loaded.status}

@@ -1,5 +1,4 @@
 import { defineBlock, ExternalLink, Muted, Note, Section } from "../../shared/index";
-import { PREVIEW_THEME_ID } from "../../shared/constants";
 import { load, type Data } from "./logic";
 
 export function View({ data }: { data: Data }) {
@@ -20,7 +19,7 @@ export function View({ data }: { data: Data }) {
         </s-stack>
       </Section>
       <Section title="Preview theme">
-        {data.preview ? <ExternalLink href={data.preview.url}>{data.preview.label}</ExternalLink> : <Muted>No preview theme set. Add its id as PREVIEW_THEME_ID in the constants file{PREVIEW_THEME_ID ? "" : "."}</Muted>}
+        {data.preview ? <ExternalLink href={data.preview.url}>{data.preview.label}</ExternalLink> : <Muted>No preview theme set. Add the theme id on the Settings page of the app.</Muted>}
       </Section>
       <Section title="Admin">
         <ExternalLink href={data.orders.url}>{data.orders.label}</ExternalLink>

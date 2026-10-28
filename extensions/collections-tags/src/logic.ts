@@ -1,8 +1,9 @@
 import { allCollections, COLLECTION_FIELDS, type CollectionInfo, type RawCollections } from "../../shared/collections";
 import { adminCollectionUrl, shopHandle } from "../../shared/admin";
-import type { LoadContext } from "../../shared/graphql";
+import type { LoadContext } from "../../shared/query";
+import { settingsOf } from "../../shared/settings";
 
-export type Data = { collections: (CollectionInfo & { url: string })[]; tags: string[]; complete: boolean };
+export type Data = { collections: (CollectionInfo & { url: string })[]; tags: string[]; complete: boolean; show: { tags: boolean; type: boolean } };
 
 const QUERY = `query CollectionsTags($id: ID!) {
   shop { myshopifyDomain }
@@ -13,7 +14,9 @@ const QUERY = `query CollectionsTags($id: ID!) {
   }
 }`;
 
-export async function load({ productId, q }: LoadContext): Promise<Data> {
+export async function load(ctx: LoadContext): Promise<Data> {
+  const { productId, q } = ctx;
+  const settings = settingsOf(ctx);
   const d = await q<{ shop: { myshopifyDomain: string }; product: { tags: string[]; collections: RawCollections } | null }>(QUERY, { id: productId });
   if (!d.product) throw new Error("Product not found");
   const handle = shopHandle(d.shop.myshopifyDomain);
@@ -22,5 +25,6 @@ export async function load({ productId, q }: LoadContext): Promise<Data> {
     collections: [...list].sort((a, b) => a.title.localeCompare(b.title)).map((c) => ({ ...c, url: adminCollectionUrl(handle, c.id) })),
     tags: [...d.product.tags].sort((a, b) => a.localeCompare(b)),
     complete,
+    show: { tags: settings.collections.showTags, type: settings.collections.showType },
   };
 }

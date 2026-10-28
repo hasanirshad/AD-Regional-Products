@@ -65,7 +65,7 @@ export type LoadHooks = {
  * A product that no longer exists gets no values (its cells stay empty and it is reported as missing by the caller).
  */
 export async function loadCells(gql: Gql, productIds: string[], columns: Column[], cache: Cache, hooks: LoadHooks = {}): Promise<number> {
-  const needsVariant = columns.some((c) => c.group === "Prices");
+  const needsVariant = columns.some((c) => c.group === "Variant");
   let done = 0;
   const total = productIds.length;
   for (const group of chunks(productIds, BATCH)) {

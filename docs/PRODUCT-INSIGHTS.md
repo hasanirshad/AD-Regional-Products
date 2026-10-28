@@ -1,5 +1,9 @@
 # Product Insights blocks (added 2026-10-27)
 
+> **Update 2026-10-28:** the blocks now read their settings from the app (page "Block settings", see `docs/BLOCK-SETTINGS.md`). The values in
+> `constants.ts` below are the **defaults** used when nothing is saved or a saved value is broken. To change a market domain, the
+> preview theme, the lead-time keys, the badge or the languages, use the Block settings page; no code change and no redeploy.
+
 Seven **read-only** admin blocks for the product details page. Each is its own extension, so each can be added or removed
 from "+ Block" on the product page. No server, no routes, no writes: every block calls the Admin GraphQL API straight from
 the extension (`shopify.query`). A query that starts with `mutation` is refused in `extensions/shared/graphql.ts`, and a test
@@ -21,8 +25,10 @@ checks that no block sends one. Links only, no buttons.
 extensions/
   tsconfig.json, globals.d.ts      Preact JSX + the `shopify` global (own typecheck: tsc -p extensions)
   shared/
-    constants.ts                   ALL store-specific values (edit only this file)
-    graphql.ts                     query wrapper: read-only guard, throttle retry, plain error messages
+    constants.ts                   the DEFAULT store-specific values (the Block settings page overrides them)
+    settings.ts                    settings shape, defaults, value rules, parser and the reader the blocks use (pure)
+    query.ts, pure.ts              query wrapper and query helpers without the `shopify` global (the app imports them too)
+    graphql.ts                     re-exports query.ts + the `shopify` global; query.ts: read-only guard, throttle retry, plain error messages
     pricing.ts                     price per market (Product.contextualPricing, with a variants fallback)
     collections.ts, translations.tsx, admin.ts, format.ts
     ui.tsx                         defineBlock + loading / error / empty states + small components
@@ -45,7 +51,7 @@ Only one is new. The app config (`shopify.app.production.toml`) now has `read_tr
 
 No write scope was added. Direct API access (`[access.admin] direct_api_mode = "online"`) was already on.
 
-## Constants to fill in (`extensions/shared/constants.ts`)
+## Constants (`extensions/shared/constants.ts`): the defaults
 
 Lines marked CONFIRM are my best guess and must be checked:
 

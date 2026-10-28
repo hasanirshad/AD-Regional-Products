@@ -131,6 +131,16 @@ export function useEditState(shared: EditorShared): EditState {
 
   const doc = productId ? (docs[productId] ?? null) : null;
 
+  // The boxes changed (an adaptation was added or removed on the Settings page): read the open products again.
+  const slotKey = slotKeys.join("|");
+  const readWith = useRef(slotKey);
+  useEffect(() => {
+    if (readWith.current === slotKey) return;
+    readWith.current = slotKey;
+    const ids = Object.keys(docsRef.current);
+    if (ids.length > 0) void refresh(ids);
+  }, [slotKey, refresh]);
+
   // Variant rows chosen after the product was opened: read them now.
   const variantKey = chosen.variant.join("|");
   useEffect(() => {

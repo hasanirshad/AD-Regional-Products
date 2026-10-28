@@ -7,10 +7,10 @@ export function View({ data }: { data: Data }) {
       <Section title={`Collections (${data.collections.length})`}>
         {data.collections.length ? (
           <Table
-            headers={["Collection", "Type"]}
+            headers={data.show.type ? ["Collection", "Type"] : ["Collection"]}
             rows={data.collections.map((c) => ({
               key: c.id,
-              cells: [<ExternalLink href={c.url}>{c.title}</ExternalLink>, <Pill tone={c.automated ? "info" : "neutral"}>{c.automated ? "Automated" : "Manual"}</Pill>],
+              cells: data.show.type ? [<ExternalLink href={c.url}>{c.title}</ExternalLink>, <Pill tone={c.automated ? "info" : "neutral"}>{c.automated ? "Automated" : "Manual"}</Pill>] : [<ExternalLink href={c.url}>{c.title}</ExternalLink>],
             }))}
           />
         ) : (
@@ -18,6 +18,7 @@ export function View({ data }: { data: Data }) {
         )}
         {data.complete ? null : <Muted>More collections exist than were read.</Muted>}
       </Section>
+      {data.show.tags ? (
       <Section title={`Tags (${data.tags.length})`}>
         {data.tags.length ? (
           <s-stack direction="inline" gap="small-300">
@@ -31,6 +32,7 @@ export function View({ data }: { data: Data }) {
           <Muted>No tags.</Muted>
         )}
       </Section>
+      ) : null}
     </s-stack>
   );
 }
@@ -38,6 +40,6 @@ export function View({ data }: { data: Data }) {
 export default defineBlock<Data>({
   heading: "Collections and tags",
   load,
-  summary: (d) => `${plural(d.collections.length, "collection")}, ${plural(d.tags.length, "tag")}`,
+  summary: (d) => (d.show.tags ? `${plural(d.collections.length, "collection")}, ${plural(d.tags.length, "tag")}` : plural(d.collections.length, "collection")),
   View,
 });

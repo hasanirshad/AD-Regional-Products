@@ -310,7 +310,7 @@ describe("Collections and Tags", () => {
   });
 
   it("says plainly when there are none", () => {
-    const out = html(<CollectionsView data={{ collections: [], tags: [], complete: true }} />);
+    const out = html(<CollectionsView data={{ collections: [], tags: [], complete: true, show: { tags: true, type: true } }} />);
     expect(out).toContain("Not in any collection.");
     expect(out).toContain("No tags.");
   });
@@ -331,7 +331,7 @@ describe("Quick Links", () => {
     const d = links.buildLinks({ handle: "x", status: "DRAFT", shop: "hardman", productId: PRODUCT, themeId: "" });
     expect(d.preview).toBeNull();
     const out = html(<LinksView data={d} />);
-    expect(out).toContain("PREVIEW_THEME_ID");
+    expect(out).toContain("Settings page");
     expect(out).toContain("Product is draft");
   });
 

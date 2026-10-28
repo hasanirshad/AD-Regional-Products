@@ -64,6 +64,11 @@ vi.mock("./admin", async (orig) => {
         return { productVariantsBulkUpdate: { userErrors: [] } };
       }
       if (query.includes("inventorySetQuantities")) {
+        // API 2026-04+: changeFromQuantity is mandatory (null opts out); compareQuantity and ignoreCompareQuantity are gone.
+        for (const q of vars.input.quantities as any[]) {
+          if (!("changeFromQuantity" in q) || q.changeFromQuantity === undefined) throw new Error("changeFromQuantity is missing");
+        }
+        if ("ignoreCompareQuantity" in vars.input || vars.input.quantities.some((q: any) => "compareQuantity" in q)) throw new Error("removed field sent");
         store.calls.push(`qty:${JSON.stringify(vars.input.quantities.map((q: any) => [q.inventoryItemId, q.quantity]))}`);
         if (!store.ignore) {
           for (const q of vars.input.quantities as any[]) {

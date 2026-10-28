@@ -3,6 +3,7 @@
 import { render, type ComponentChildren, type VNode } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { BlockError, makeQueries, selectedProductId, type LoadContext } from "./graphql";
+import { readSettings, type SettingsRaw } from "./settings";
 
 export type BlockConfig<T> = {
   heading: string;
@@ -14,7 +15,7 @@ export type BlockConfig<T> = {
   View: (props: { data: T }) => VNode;
 };
 
-export type LoadState<T> = { kind: "loading" } | { kind: "error"; error: BlockError } | { kind: "ready"; data: T };
+export type LoadState<T> = { kind: "loading" } | { kind: "error"; error: BlockError } | { kind: "ready"; data: T; /** Said under the block when the saved settings could not be used. */ notice?: string | null };
 
 export function Loading() {
   return (
@@ -99,6 +100,7 @@ export function ExternalLink({ href, children }: { href: string; children: Compo
 export function BlockView<T>({ cfg, state }: { cfg: BlockConfig<T>; state: LoadState<T> }) {
   let body: VNode;
   let summary: string | undefined;
+  const notice = state.kind === "ready" ? state.notice : null;
   if (state.kind === "loading") body = <Loading />;
   else if (state.kind === "error") {
     body = <ErrorNote error={state.error} />;
@@ -111,6 +113,7 @@ export function BlockView<T>({ cfg, state }: { cfg: BlockConfig<T>; state: LoadS
   return (
     <s-admin-block heading={cfg.heading} collapsedSummary={summary}>
       {body}
+      {notice ? <Muted>{notice}</Muted> : null}
     </s-admin-block>
   );
 }
@@ -125,9 +128,9 @@ function Root<T>({ cfg }: { cfg: BlockConfig<T> }) {
       return;
     }
     const { q, soft } = makeQueries((query, variables) => shopify.query(query, { variables }));
-    cfg
-      .load({ productId, q, soft })
-      .then((data) => live && setState({ kind: "ready", data }))
+    // The settings are read first. Whatever goes wrong there, the block still loads with its default settings.
+    readSettings((query) => soft<SettingsRaw>(query))
+      .then((read) => cfg.load({ productId, q, soft, settings: read.settings }).then((data) => live && setState({ kind: "ready", data, notice: read.notice })))
       .catch((e: unknown) => {
         if (!live) return;
         const error = e instanceof BlockError ? e : new BlockError("graphql", "Something went wrong while building this block.", e instanceof Error ? e.message : String(e));

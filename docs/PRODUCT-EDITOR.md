@@ -43,7 +43,7 @@ for a product that still has only the default variant.
 ## Bulk edit
 
 Table (one row per product) sortable on any column; columns chosen by you: product fields, price and compare-at (products
-with ONE variant only), product metafields (inline-editable types; others shown only), and translations of title,
+with ONE variant only), **SKU and barcode** (one-variant products only; added 2026-10-28), product metafields (inline-editable types; others shown only), and translations of title,
 description, SEO title, SEO description, handle, product type per language. Filters: status, vendor, type, tag, collection,
 market catalogue (in / not in), missing translation in a language, empty metafield. Edit inline or **paste from a
 spreadsheet** (row 1 = column names, first column = Handle, ID or Title; empty pasted cell = no change; `[clear]` empties).
@@ -121,7 +121,7 @@ metafield translations (text, multi-line, URL only are offered); `$app` metafiel
 
 ## What the API could not do / limits
 
-- No UI for market-specific translations (`en@market` style); the model supports it, the pages do not show it.
+- Market-specific translations (`en@market` style) appear only for the **market adaptations** chosen on the Block settings page (`docs/BLOCK-SETTINGS.md`): each one adds a box in Edit product and a column choice and filter entry in Bulk edit. Unverified on the real store, especially for the main language.
 - Bulk price columns apply to single-variant products only (multi-variant products show "Several variants").
 - Bulk metafield columns are editable only for single inline types; lists, references and rich text are shown only.
 - Bulk has no metafield translations.
