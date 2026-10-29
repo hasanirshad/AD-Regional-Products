@@ -1,59 +1,49 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { BulkFilterPanel } from "../components/editor/BulkFilterPanel";
 import { BulkTable } from "../components/editor/BulkTable";
 import { ColumnChooser } from "../components/editor/BulkColumns";
 import { PasteDialog } from "../components/editor/BulkPaste";
 import { ChangesBar } from "../components/editor/ChangesBar";
 import { ReviewScreen } from "../components/editor/ReviewScreen";
+import { VariantBulk } from "../components/editor/VariantBulk";
 import { UndoBar } from "../components/editor/UndoBar";
-import { FilterBar } from "../components/FilterBar";
 import { Loading } from "../components/Loading";
 import { PageBody } from "../components/PageBody";
 import { ScopeBanner } from "../components/ScopeBanner";
-import { SelectField } from "../components/SelectField";
-import { activeFilterCount, NO_BULK_FILTERS, tableToTsv, targetOf, type BulkFilters, type Column, type PastePlan } from "../lib/editor/bulk";
-import { filterOptions } from "../lib/filter";
+import { tableToTsv, targetOf, type Column, type PastePlan } from "../lib/editor/bulk";
 import { targetKey } from "../lib/editor/model";
+import { onChecked } from "../lib/dom";
 import { PAGE_SIZE, QUICK } from "./bulk-state";
+import type { BulkMode } from "./bulk-variants-state";
 import { useStartEditor } from "./editor-state";
 import { useStartProducts } from "./products-state";
 import { useAppState } from "./state";
 
-const STATUS_LABEL: Record<string, string> = { ACTIVE: "Active", DRAFT: "Draft", ARCHIVED: "Archived" };
-const ANY = "";
 
 // Bulk edit: many products in one table. Choose the columns (fields and languages), filter, sort, type in cells or paste
 // from a spreadsheet, review every old and new value, then confirm once. Reading is free; nothing is written before that.
 export default function BulkEdit() {
-  const { products, editor: shared, bulk, shop } = useAppState();
+  const { products, editor: shared, bulk, variantBulk: vb, shop } = useAppState();
   useStartProducts(products);
-  useStartEditor(shared, ["info", "productDefs", "settings"]);
+  useStartEditor(shared, ["info", "productDefs", "variantDefs", "settings"]);
   const [choosing, setChoosing] = useState(false);
   const [pasting, setPasting] = useState(false);
   const [reviewing, setReviewing] = useState<"save" | "undo" | null>(null);
+  // Which mode the review belongs to: the Undo and the review of changes both go back to it.
+  const [reviewMode, setReviewMode] = useState<BulkMode>("products");
+  const variants = vb.mode === "variants";
+  const startReview = (kind: "save" | "undo") => {
+    setReviewMode(vb.mode);
+    setReviewing(kind);
+  };
   const [notice, setNotice] = useState("");
-  const { filters, columns } = bulk;
+  const { columns } = bulk;
   const defs = shared.productDefs.data ?? [];
 
   // The collections list is read once, for the Collection filter.
   useEffect(() => {
     bulk.collections.load();
   }, [bulk.collections.load]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const options = useMemo(() => filterOptions(products.rows), [products.rows]);
-  const set = (patch: Partial<BulkFilters>) => bulk.setFilters({ ...filters, ...patch });
-  const slotLabel = (key: string) => shared.slots.find((s) => s.key === key)?.label ?? key;
-  const defName = (key: string) => defs.find((d) => `${d.namespace}.${d.key}` === key)?.name ?? key;
-  const catalogName = (id: string) => options.catalogs.find((c) => c.id === id)?.title ?? "catalogue";
-
-  const chips: { key: string; label: string }[] = [];
-  if (filters.status) chips.push({ key: "status", label: `Status: ${(STATUS_LABEL[filters.status] ?? filters.status).toLowerCase()}` });
-  if (filters.vendor) chips.push({ key: "vendor", label: `Vendor: ${filters.vendor}` });
-  if (filters.productType) chips.push({ key: "productType", label: `Type: ${filters.productType}` });
-  if (filters.tag) chips.push({ key: "tag", label: `Tag: ${filters.tag}` });
-  if (filters.collection) chips.push({ key: "collection", label: `Collection: ${bulk.collections.data?.find((c) => c.id === filters.collection)?.title ?? "…"}` });
-  if (filters.catalog) chips.push({ key: "catalog", label: `${filters.catalogMode === "in" ? "In" : "Not in"} ${catalogName(filters.catalog)}` });
-  if (filters.missingSlot) chips.push({ key: "missingSlot", label: `Missing translation: ${slotLabel(filters.missingSlot)}` });
-  if (filters.emptyMetafield) chips.push({ key: "emptyMetafield", label: `Empty: ${defName(filters.emptyMetafield)}` });
 
   const rows = bulk.rows;
   const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
@@ -88,7 +78,7 @@ export default function BulkEdit() {
         <PageBody maxWidth={1280}>
           <ReviewScreen
             kind={reviewing}
-            edit={bulk}
+            edit={reviewMode === "variants" ? vb : bulk}
             shared={shared}
             products={products}
             finishLabel="Back to the table"
@@ -96,8 +86,13 @@ export default function BulkEdit() {
               setReviewing(null);
               if (appliedIds.length) {
                 setNotice("");
-                bulk.discard(appliedIds);
-                bulk.reread(appliedIds);
+                if (reviewMode === "variants") {
+                  vb.discard(appliedIds);
+                  vb.reread();
+                } else {
+                  bulk.discard(appliedIds);
+                  bulk.reread(appliedIds);
+                }
               }
             }}
           />
@@ -121,14 +116,29 @@ export default function BulkEdit() {
     <s-page heading="Bulk edit" inlineSize="large">
       <PageBody maxWidth={1280}>
         <s-stack gap="large-100">
-          <UndoBar shared={shared} onUndo={() => setReviewing("undo")} />
-          <ChangesBar edits={bulk.edits} built={bulk.built} onReview={() => setReviewing("save")} onDiscard={bulk.discardAll} />
-          {notice && Object.keys(bulk.edits).length > 0 ? (
+          <UndoBar shared={shared} onUndo={() => startReview("undo")} />
+          <s-section>
+            <s-stack gap="small-200">
+              <s-switch
+                label="Edit variants"
+                details="Off: one row per product. On: choose products, then edit their variants (price, SKU, metafields and their translations)."
+                checked={variants || undefined}
+                ref={onChecked((on) => vb.setMode(on ? "variants" : "products"))}
+              />
+              {variants && Object.keys(bulk.edits).length > 0 ? <s-text color="subdued">{`${Object.keys(bulk.edits).length} unsaved product change${Object.keys(bulk.edits).length === 1 ? "" : "s"} are kept. Switch this off to review them.`}</s-text> : null}
+              {!variants && Object.keys(vb.edits).length > 0 ? <s-text color="subdued">{`${Object.keys(vb.edits).length} unsaved variant change${Object.keys(vb.edits).length === 1 ? "" : "s"} are kept. Switch this on to review them.`}</s-text> : null}
+            </s-stack>
+          </s-section>
+          <ChangesBar edits={variants ? vb.edits : bulk.edits} built={variants ? vb.built : bulk.built} onReview={() => startReview("save")} onDiscard={variants ? vb.discardAll : bulk.discardAll} />
+          {notice && Object.keys(variants ? vb.edits : bulk.edits).length > 0 ? (
             <s-banner tone="success" dismissible onDismiss={() => setNotice("")}>
               <s-paragraph>{notice}</s-paragraph>
             </s-banner>
           ) : null}
 
+          {variants ? <VariantBulk vb={vb} bulk={bulk} shared={shared} products={products} /> : null}
+          {variants ? null : (
+          <>
           <s-section heading="Columns and filters">
             <s-stack gap="base">
               <s-stack direction="inline" gap="small-200" alignItems="center">
@@ -145,41 +155,7 @@ export default function BulkEdit() {
               </s-stack>
               {shared.info.status === "error" ? <s-text tone="critical">{`Languages could not be read: ${shared.info.error}`}</s-text> : null}
               {shared.productDefs.status === "error" ? <s-text tone="critical">{`Metafield definitions could not be read: ${shared.productDefs.error}`}</s-text> : null}
-              <FilterBar
-                search={filters.search}
-                onSearch={(search) => set({ search })}
-                placeholder="Search title, handle, vendor, type or tag"
-                activeCount={activeFilterCount(filters)}
-                chips={chips}
-                onRemoveChip={(key) => set({ [key]: "" } as Partial<BulkFilters>)}
-                onClear={() => bulk.setFilters(NO_BULK_FILTERS)}
-              >
-                <SelectField label="Status" value={filters.status} options={[{ value: ANY, label: "Any" }, ...options.statuses.map((s) => ({ value: s, label: STATUS_LABEL[s] ?? s }))]} onChange={(status) => set({ status })} />
-                <SelectField label="Vendor" value={filters.vendor} options={[{ value: ANY, label: "Any" }, ...options.vendors.map((v) => ({ value: v, label: v }))]} onChange={(vendor) => set({ vendor })} />
-                <SelectField label="Product type" value={filters.productType} options={[{ value: ANY, label: "Any" }, ...options.types.map((v) => ({ value: v, label: v }))]} onChange={(productType) => set({ productType })} />
-                <SelectField label="Tag" value={filters.tag} options={[{ value: ANY, label: "Any" }, ...options.tags.map((v) => ({ value: v, label: v }))]} onChange={(tag) => set({ tag })} />
-                <SelectField
-                  label="Collection"
-                  value={filters.collection}
-                  options={[{ value: ANY, label: bulk.collections.status === "loading" ? "Reading collections…" : "Any" }, ...(bulk.collections.data ?? []).map((c) => ({ value: c.id, label: c.title }))]}
-                  onChange={(collection) => set({ collection })}
-                />
-                <SelectField label="Market catalogue" value={filters.catalog} options={[{ value: ANY, label: "Any" }, ...options.catalogs.map((c) => ({ value: c.id, label: c.title }))]} onChange={(catalog) => set({ catalog })} />
-                {filters.catalog ? (
-                  <SelectField
-                    label="Products that are"
-                    value={filters.catalogMode}
-                    options={[
-                      { value: "in", label: "Published in it" },
-                      { value: "not", label: "Not published in it" },
-                    ]}
-                    onChange={(catalogMode) => set({ catalogMode: catalogMode === "not" ? "not" : "in" })}
-                  />
-                ) : null}
-                <SelectField label="Missing translation in" value={filters.missingSlot} options={[{ value: ANY, label: "Any" }, ...shared.slots.map((s) => ({ value: s.key, label: s.label }))]} onChange={(missingSlot) => set({ missingSlot })} />
-                <SelectField label="Empty metafield" value={filters.emptyMetafield} options={[{ value: ANY, label: "Any" }, ...defs.map((d) => ({ value: `${d.namespace}.${d.key}`, label: `${d.name} (${d.namespace}.${d.key})` }))]} onChange={(emptyMetafield) => set({ emptyMetafield })} />
-              </FilterBar>
-              {bulk.collectionError ? <s-text tone="critical">{`The collection could not be read: ${bulk.collectionError}`}</s-text> : null}
+              <BulkFilterPanel bulk={bulk} shared={shared} products={products} />
             </s-stack>
           </s-section>
 
@@ -256,6 +232,8 @@ export default function BulkEdit() {
                 </s-stack>
               </s-section>
             </>
+          )}
+          </>
           )}
         </s-stack>
         {choosing ? (

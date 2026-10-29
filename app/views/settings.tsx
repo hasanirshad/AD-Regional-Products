@@ -4,6 +4,8 @@ import { Loading } from "../components/Loading";
 import { PageBody } from "../components/PageBody";
 import { useGuard } from "../components/PasswordGate";
 import { PreviewPanel } from "../components/settings/PreviewPanel";
+import { DetectPanel } from "../components/settings/DetectPanel";
+import { GroupsPanel, HelpersPanel, RecordsPanel, ThemeFieldsPanel, ThresholdsPanel } from "../components/settings/HealthPanels";
 import { QualityPanel } from "../components/settings/QualityPanel";
 import { ActivityPanel, AdaptationsPanel, CollectionsPanel, LinksPanel, MarketsPanel, SalePanel } from "../components/settings/SimplePanels";
 import { TranslationPanel } from "../components/settings/TranslationPanel";
@@ -19,6 +21,11 @@ import { useAppState } from "./state";
 const PANELS: Record<TabId, (p: PanelProps) => React.ReactNode> = {
   translation: TranslationPanel,
   quality: QualityPanel,
+  groups: GroupsPanel,
+  thresholds: ThresholdsPanel,
+  themeFields: ThemeFieldsPanel,
+  helpers: HelpersPanel,
+  records: RecordsPanel,
   links: LinksPanel,
   markets: MarketsPanel,
   sale: SalePanel,
@@ -179,6 +186,8 @@ export default function BlockSettingsPage() {
         </s-banner>
       ) : null}
       {stored.blocks.source === "default" && blockDraft.value === null ? <s-text color="subdued">Nothing is saved yet, so the blocks use their default settings. The values below are those defaults.</s-text> : null}
+
+      <DetectPanel {...panelProps} first={stored.blocks.source === "default" && blockDraft.value === null} />
 
       <s-section>
         <s-stack gap="base">

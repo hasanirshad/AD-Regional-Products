@@ -212,6 +212,26 @@ export class FakeShopify {
       }
       case "EditorCategories":
         return { taxonomy: { categories: { nodes: this.categories.filter((c) => c.fullName.toLowerCase().includes(String(vars.search).toLowerCase())) } } };
+      case "BulkVariantRows":
+      case "BulkVariantRowsMore": {
+        const shape = (v: FakeVariant) => ({ id: v.id, title: v.title, position: v.position, price: v.price, compareAtPrice: v.compareAtPrice, barcode: v.barcode, inventoryPolicy: v.inventoryPolicy, inventoryItem: { tracked: v.tracked, sku: v.sku } });
+        const page = (list: FakeVariant[], after: string | null) => {
+          const start = after ? Number(after) : 0;
+          const slice = list.slice(start, start + 100);
+          const end = start + slice.length;
+          return { pageInfo: { hasNextPage: end < list.length, endCursor: String(end) }, nodes: slice.map(shape) };
+        };
+        if (op === "BulkVariantRowsMore") {
+          const p = this.products.get(vars.id as string);
+          return { product: p ? { variants: page(p.variants, (vars.after as string | null) ?? null) } : null };
+        }
+        return {
+          nodes: (vars.ids as string[]).map((id) => {
+            const p = this.products.get(id);
+            return p ? { id, title: p.title, handle: p.handle, variants: page(p.variants, null) } : null;
+          }),
+        };
+      }
       case "BulkSingleVariants":
         return {
           nodes: (vars.ids as string[]).map((id) => {

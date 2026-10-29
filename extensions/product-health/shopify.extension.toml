@@ -1,0 +1,12 @@
+api_version = "2026-10"
+
+[[extensions]]
+type = "ui_extension"
+name = "Product health"
+handle = "insights-product-health"
+uid = "3c8f1a52-9d47-4e6b-b1a0-5e2d7c9f0b11"
+description = "Read-only: score, verdict and the list of what is pending, by severity."
+
+  [[extensions.targeting]]
+  target = "admin.product-details.block.render"
+  module = "./src/Block.tsx"

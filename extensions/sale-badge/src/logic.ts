@@ -1,6 +1,8 @@
 import type { MarketDef } from "../../shared/constants";
 import { allCollections, COLLECTION_FIELDS, type RawCollections } from "../../shared/collections";
+import { loadFacts } from "../../shared/facts";
 import { discountPercent } from "../../shared/format";
+import { compareAtIssues } from "../../shared/rules";
 import { aliasOf, gqlString, localeLiteral } from "../../shared/pure";
 import type { BlockError, LoadContext } from "../../shared/query";
 import { withPricing, type MarketPrice } from "../../shared/pricing";
@@ -41,6 +43,8 @@ export type Data = {
   inSaleCollection: boolean;
   collectionsComplete: boolean;
   note: string | null;
+  /** Variants whose compare-at price is not a real discount (the Variants check of Product health). null = variants not read. */
+  oddVariants: { equal: string[]; lower: string[] } | null;
   /** What the settings ask for, so the view can name them. */
   config: { badgeNamespace: string; badgeKey: string; collectionHandle: string; languages: Language[] };
 };
@@ -61,7 +65,7 @@ export async function load(ctx: LoadContext): Promise<Data> {
   const product = result.product;
   if (!product) throw new Error("Product not found");
 
-  const [{ list, complete }, badge] = await Promise.all([
+  const [{ list, complete }, badge, oddVariants] = await Promise.all([
     allCollections(q, productId, product.collections),
     (async (): Promise<BadgeInfo> => {
       const value = product.badge?.value?.trim() || null;
@@ -72,6 +76,13 @@ export async function load(ctx: LoadContext): Promise<Data> {
       const translations = Object.fromEntries(languages.map((l) => [l.code, cellFor(r.translatableContent ?? [], (r[alias(l.code)] as Translations | undefined) ?? [], "value")]));
       return { value, translations, translationError: res.error };
     })(),
+    loadFacts(ctx, { variants: true }).then(
+      (facts) => {
+        const odd = compareAtIssues(facts.variants);
+        return { equal: odd.equal.map((v) => v.title), lower: odd.lower.map((v) => v.title) };
+      },
+      () => null,
+    ),
   ]);
 
   return {
@@ -80,6 +91,7 @@ export async function load(ctx: LoadContext): Promise<Data> {
     inSaleCollection: settings.sale.collectionHandle !== "" && list.some((c) => c.handle === settings.sale.collectionHandle),
     collectionsComplete: complete,
     note: pricing.note,
+    oddVariants,
     config: { badgeNamespace: badgeKey.namespace, badgeKey: badgeKey.key, collectionHandle: settings.sale.collectionHandle, languages },
   };
 }

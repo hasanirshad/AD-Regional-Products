@@ -13,6 +13,7 @@ import type { AppState } from "./state";
 import type { EditorShared } from "./editor-state";
 import type { EditState } from "./edit-state";
 import type { BulkState } from "./bulk-state";
+import type { VariantBulkState } from "./bulk-variants-state";
 
 export type ProductScope = "active" | "all";
 
@@ -171,6 +172,7 @@ export type Shared = AppState & {
   editor: EditorShared;
   edit: EditState;
   bulk: BulkState;
+  variantBulk: VariantBulkState;
   products: ProductsLoad;
   ui: ProductsUi;
   channelsUi: ProductsUi;

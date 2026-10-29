@@ -8,6 +8,13 @@
 // checks that nobody else saved in the meantime, writes, and reads the value back.
 
 import {
+  GROUPS,
+  GROUP_LABEL,
+  PROFILES,
+  PROFILE_LABEL,
+  RULE_CATALOGUE,
+  SEVERITY_LABEL,
+  THEME_RULE_LABEL,
   CHECK_CATALOGUE,
   CORE_FIELD_LABEL,
   SETTINGS_KEY,
@@ -30,11 +37,16 @@ export { SETTINGS_KEY, SETTINGS_NAMESPACE };
 
 // ---------------------------------------------------------------- tabs
 
-export type TabId = "translation" | "quality" | "links" | "markets" | "sale" | "collections" | "activity" | "adaptations";
+export type TabId = "translation" | "quality" | "groups" | "thresholds" | "themeFields" | "helpers" | "records" | "links" | "markets" | "sale" | "collections" | "activity" | "adaptations";
 
 export const SETTINGS_TABS: { id: TabId; label: string; about: string }[] = [
   { id: "translation", label: "Translation status", about: "Which rows the block shows, in which order, and for which languages." },
-  { id: "quality", label: "Data quality", about: "Which checks run, and which metafields they look at." },
+  { id: "groups", label: "Groups and profiles", about: "Which groups of checks run, for which kind of product. Single checks sit in the Advanced fold. Used by Product health and Data quality." },
+  { id: "thresholds", label: "Thresholds", about: "SEO lengths, minimum images, alt text target, score weights and the main market." },
+  { id: "themeFields", label: "Theme fields", about: "The metafields your storefront theme reads, and what each must look like." },
+  { id: "helpers", label: "Helper products", about: "Which Types, tags and title patterns mean Option product or Bundle, and the Types a product should have." },
+  { id: "records", label: "Linked records", about: "The swatch, delivery-time and design records, and the variant metafields that point to them." },
+  { id: "quality", label: "Data quality", about: "Length, seater and lead-time metafields, and your own “metafield must not be empty” checks." },
   { id: "links", label: "Quick links", about: "The preview theme and the storefront domain of each market." },
   { id: "markets", label: "Market availability", about: "The markets the Market availability and Sale and badge blocks list." },
   { id: "sale", label: "Sale and badge", about: "The sale collection and the badge metafield." },
@@ -54,6 +66,16 @@ export function problemTab(path: string): TabId {
       return "translation";
     case "quality":
       return "quality";
+    case "groups":
+      return "groups";
+    case "thresholds":
+      return "thresholds";
+    case "themeFields":
+      return "themeFields";
+    case "helpers":
+      return "helpers";
+    case "records":
+      return "records";
     case "links":
       return "links";
     case "markets": {
@@ -85,6 +107,21 @@ export function resetTab(s: BlockSettings, tab: TabId): BlockSettings {
       break;
     case "quality":
       next.quality = d.quality;
+      break;
+    case "groups":
+      next.groups = d.groups;
+      break;
+    case "thresholds":
+      next.thresholds = d.thresholds;
+      break;
+    case "themeFields":
+      next.themeFields = d.themeFields;
+      break;
+    case "helpers":
+      next.helpers = d.helpers;
+      break;
+    case "records":
+      next.records = d.records;
       break;
     case "links": {
       next.links = { ...next.links, previewThemeId: d.links.previewThemeId };
@@ -146,9 +183,61 @@ function marketChanges(a: MarketSetting | undefined, b: MarketSetting | undefine
   if (a.enabled !== b.enabled) out.push({ tab: "markets", label: `${key} shown in the blocks`, from: onOff(a.enabled), to: onOff(b.enabled) });
   if (a.label !== b.label) out.push({ tab: "markets", label: `${key} name`, from: a.label, to: b.label });
   if (a.country !== b.country) out.push({ tab: "markets", label: `${key} country`, from: a.country, to: b.country });
+  if (a.locale !== b.locale) out.push({ tab: "markets", label: `${key} language`, from: show(a.locale), to: show(b.locale) });
   if (a.marketHandle !== b.marketHandle) out.push({ tab: "markets", label: `${key} market handle`, from: show(a.marketHandle), to: show(b.marketHandle) });
   if (a.domain !== b.domain) out.push({ tab: "links", label: `${key} storefront domain`, from: a.domain, to: b.domain });
   if (a.stayUs !== b.stayUs) out.push({ tab: "links", label: `${key} adds ?stay_us=1`, from: onOff(a.stayUs), to: onOff(b.stayUs) });
+}
+
+const listText = (list: string[]) => (list.length ? list.join(", ") : "none");
+
+/** The differences in the five health sections. */
+function diffHealth(before: BlockSettings, after: BlockSettings, push: (tab: TabId, label: string, from: string, to: string) => void, out: SettingChange[]) {
+  for (const g of GROUPS) {
+    push("groups", `${GROUP_LABEL[g]} group`, onOff(before.groups.groups[g]), onOff(after.groups.groups[g]));
+    for (const p of PROFILES) push("groups", `${GROUP_LABEL[g]} for ${PROFILE_LABEL[p].toLowerCase()}`, onOff(before.groups.profiles[p][g]), onOff(after.groups.profiles[p][g]));
+  }
+  for (const r of RULE_CATALOGUE) push("groups", `Single check: ${r.label}`, onOff(!before.groups.disabledRules.includes(r.id)), onOff(!after.groups.disabledRules.includes(r.id)));
+
+  const t0 = before.thresholds;
+  const t1 = after.thresholds;
+  push("thresholds", "SEO title, longest", String(t0.seoTitleMax), String(t1.seoTitleMax));
+  push("thresholds", "SEO description, shortest", String(t0.seoDescMin), String(t1.seoDescMin));
+  push("thresholds", "SEO description, longest", String(t0.seoDescMax), String(t1.seoDescMax));
+  push("thresholds", "Minimum images", String(t0.minImages), String(t1.minImages));
+  push("thresholds", "Alt text target (percent)", String(t0.altTarget), String(t1.altTarget));
+  for (const sev of Object.keys(SEVERITY_LABEL) as (keyof typeof SEVERITY_LABEL)[]) push("thresholds", `Score weight: ${SEVERITY_LABEL[sev]}`, String(t0.weights[sev]), String(t1.weights[sev]));
+  push("thresholds", "Main market", show(t0.primaryMarket), show(t1.primaryMarket));
+
+  const themeText = (f: BlockSettings["themeFields"][number]) => `${f.on ? "on" : "off"}, ${f.namespace}.${f.key} (${f.owner}), ${THEME_RULE_LABEL[f.rule].toLowerCase()}, ${SEVERITY_LABEL[f.severity].toLowerCase()}, for ${f.profiles.map((p) => PROFILE_LABEL[p].toLowerCase()).join(" and ") || "nobody"}`;
+  const ids = [...new Set([...before.themeFields.map((f) => f.id), ...after.themeFields.map((f) => f.id)])];
+  for (const id of ids) {
+    const a = before.themeFields.find((f) => f.id === id);
+    const b = after.themeFields.find((f) => f.id === id);
+    const name = b?.label ?? a?.label ?? id;
+    if (!a && b) out.push({ tab: "themeFields", label: `Theme field: ${name}`, from: "not in the list", to: `added, ${themeText(b)}` });
+    else if (a && !b) out.push({ tab: "themeFields", label: `Theme field: ${name}`, from: themeText(a), to: "removed" });
+    else if (a && b && themeText(a) !== themeText(b)) out.push({ tab: "themeFields", label: `Theme field: ${name}`, from: themeText(a), to: themeText(b) });
+    else if (a && b && a.label !== b.label) out.push({ tab: "themeFields", label: "Theme field name", from: a.label, to: b.label });
+  }
+
+  const h0 = before.helpers;
+  const h1 = after.helpers;
+  push("helpers", "Option product Types", listText(h0.types), listText(h1.types));
+  push("helpers", "Option product tags", listText(h0.tags), listText(h1.tags));
+  push("helpers", "Option product title patterns", listText(h0.titlePatterns), listText(h1.titlePatterns));
+  push("helpers", "Bundle Types", listText(h0.bundleTypes), listText(h1.bundleTypes));
+  push("helpers", "Bundle tags", listText(h0.bundleTags), listText(h1.bundleTags));
+  push("helpers", "Expected product Types", listText(h0.expectedCategories), listText(h1.expectedCategories));
+  push("helpers", "Wood and material names", listText(h0.woodNames), listText(h1.woodNames));
+
+  const r0 = before.records;
+  const r1 = after.records;
+  push("records", "Swatch record type", show(r0.swatchType), show(r1.swatchType));
+  push("records", "Delivery-time record type", show(r0.deliveryType), show(r1.deliveryType));
+  push("records", "Design record type", show(r0.designType), show(r1.designType));
+  push("records", "Swatch variant metafield", fieldText(r0.swatchField), fieldText(r1.swatchField));
+  push("records", "Hide-from-markets variant metafield", fieldText(r0.hideField), fieldText(r1.hideField));
 }
 
 /** Every difference between two settings, one line each, for the review. Empty = nothing to save. */
@@ -180,6 +269,8 @@ export function diffSettings(before: BlockSettings, after: BlockSettings): Setti
   push("quality", "Length metafields", fieldsText(before.quality.fields.length), fieldsText(after.quality.fields.length));
   push("quality", "Seater metafields", fieldsText(before.quality.fields.seater), fieldsText(after.quality.fields.seater));
   push("quality", "Lead-time metafields", fieldsText(before.quality.fields.leadTime), fieldsText(after.quality.fields.leadTime));
+
+  diffHealth(before, after, push, out);
 
   push("links", "Preview theme id", show(before.links.previewThemeId), show(after.links.previewThemeId));
   push("markets", "Market used for the preview link", show(before.links.previewMarket), show(after.links.previewMarket));

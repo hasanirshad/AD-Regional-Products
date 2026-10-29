@@ -15,14 +15,16 @@ export type MarketDef = {
   stayUs?: boolean;
   /** Only needed if the market cannot be found by its country (two markets share the country). Use the market handle. */
   marketHandle?: string;
+  /** The language the market sells in when it is not the store's main language (Shopify locale code). "" = the main language. */
+  locale?: string;
 };
 
 /** The markets shown in the Market Availability and Sale blocks, in this order. */
 export const MARKETS: MarketDef[] = [
-  { key: "FR", label: "France", country: "FR", domain: "hardmandesign.fr" }, // CONFIRM domain
-  { key: "DE", label: "Germany", country: "DE", domain: "hardmandesign.de" }, // CONFIRM domain
-  { key: "NL", label: "Netherlands", country: "NL", domain: "hardmandesign.nl" }, // CONFIRM domain
-  { key: "CH", label: "Switzerland", country: "CH", domain: "hardmandesign.ch" }, // CONFIRM domain
+  { key: "FR", label: "France", country: "FR", domain: "hardmandesign.fr", locale: "fr" }, // CONFIRM domain
+  { key: "DE", label: "Germany", country: "DE", domain: "hardmandesign.de", locale: "de" }, // CONFIRM domain
+  { key: "NL", label: "Netherlands", country: "NL", domain: "hardmandesign.nl", locale: "nl" }, // CONFIRM domain
+  { key: "CH", label: "Switzerland", country: "CH", domain: "hardmandesign.ch", locale: "de" }, // CONFIRM domain and language
   { key: "UK", label: "United Kingdom", country: "GB", domain: "hardmandesigns.com" }, // CONFIRM domain
   { key: "US", label: "United States", country: "US", domain: "hardmandesign.com", stayUs: true }, // CONFIRM domain
 ];

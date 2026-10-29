@@ -4,6 +4,7 @@ import { Outlet } from "react-router";
 import { Gate } from "../components/Gate";
 import { NO_INV_FILTERS, type InvFilters } from "../lib/inventoryFilter";
 import { useBulkState } from "./bulk-state";
+import { useVariantBulk } from "./bulk-variants-state";
 import { useEditState } from "./edit-state";
 import { useEditorShared } from "./editor-state";
 import { useProductsLoad, useProductsUi, type Shared } from "./products-state";
@@ -37,10 +38,11 @@ export default function Layout() {
   const editor = useEditorShared(marketIds);
   const edit = useEditState(editor);
   const bulk = useBulkState(editor, products);
+  const variantBulk = useVariantBulk(editor);
 
   const shared = useMemo<Shared | null>(
-    () => (app ? { ...app, products, ui, channelsUi, linksUi, checkUi, inventoryUi, invFilters: { value: invFilters, set: setInvFilters }, blockDraft: { value: blockDraft, set: setBlockDraft }, editor, edit, bulk } : null),
-    [app, products, ui, channelsUi, linksUi, checkUi, inventoryUi, invFilters, blockDraft, editor, edit, bulk],
+    () => (app ? { ...app, products, ui, channelsUi, linksUi, checkUi, inventoryUi, invFilters: { value: invFilters, set: setInvFilters }, blockDraft: { value: blockDraft, set: setBlockDraft }, editor, edit, bulk, variantBulk } : null),
+    [app, products, ui, channelsUi, linksUi, checkUi, inventoryUi, invFilters, blockDraft, editor, edit, bulk, variantBulk],
   );
 
   return (

@@ -7,11 +7,33 @@
 //
 // This file is pure: no Shopify global, no Preact, no React. The blocks and the app both import it.
 
+import {
+  defaultGroups,
+  defaultHelpers,
+  defaultRecords,
+  defaultThemeFields,
+  defaultThresholds,
+  healthProblems,
+  LEGACY_CHECK_RULES,
+  PROFILES,
+  GROUPS,
+  SEVERITIES,
+  THEME_RULES,
+  type GroupId,
+  type GroupsSetting,
+  type HelpersSetting,
+  type ProfileId,
+  type RecordsSetting,
+  type Severity,
+  type ThemeField,
+  type ThemeRule,
+  type Thresholds,
+} from "./healthSettings";
 import { EVENTS_LIMIT, LANGUAGES, MARKETS, type MarketDef, PREVIEW_MARKET_KEY, PREVIEW_THEME_ID, REQUIRED_FIELDS, SALE_BADGE, SALE_COLLECTION_HANDLE, TRANSLATED_METAFIELD_NAMESPACES } from "./constants";
 
 export const SETTINGS_NAMESPACE = "$app";
 export const SETTINGS_KEY = "block_settings";
-export const SETTINGS_VERSION = 1;
+export const SETTINGS_VERSION = 2;
 /** The metafield value limit is about 2 MB; settings stay far below it. */
 export const MAX_SETTINGS_CHARS = 100_000;
 
@@ -34,6 +56,8 @@ export type MarketSetting = {
   marketHandle: string;
   /** Shown in the Market availability, Sale and badge and Quick links blocks. */
   enabled: boolean;
+  /** The language the market sells in when it is not the main language ("" = the main language). Used by Storefront readiness. */
+  locale: string;
 };
 
 export const CORE_FIELDS = ["title", "body_html", "meta_title", "meta_description", "handle"] as const;
@@ -76,28 +100,51 @@ export type BlockSettings = {
   activity: { eventsLimit: number };
   /** A language adapted for one market. Used by the editor: each one adds a translation box. */
   adaptations: Adaptation[];
+  /** Health checks (version 2): groups and profiles, thresholds, theme fields, helper-product rules, linked records. */
+  groups: GroupsSetting;
+  thresholds: Thresholds;
+  themeFields: ThemeField[];
+  helpers: HelpersSetting;
+  records: RecordsSetting;
 };
 
-export type SectionId = "languages" | "translation" | "quality" | "links" | "markets" | "sale" | "collections" | "activity" | "adaptations";
-export const SECTIONS: SectionId[] = ["languages", "translation", "quality", "links", "markets", "sale", "collections", "activity", "adaptations"];
+export type SectionId = "languages" | "translation" | "quality" | "links" | "markets" | "sale" | "collections" | "activity" | "adaptations" | "groups" | "thresholds" | "themeFields" | "helpers" | "records";
+export const SECTIONS: SectionId[] = ["languages", "translation", "quality", "links", "markets", "sale", "collections", "activity", "adaptations", "groups", "thresholds", "themeFields", "helpers", "records"];
+
+export * from "./healthSettings";
 
 export type Problem = { path: string; message: string };
 
 // ---------------------------------------------------------------- the catalogue of checks
 
-export const CHECK_CATALOGUE: { kind: CheckKind; label: string; about: string; repeatable: boolean }[] = [
-  { kind: "image", label: "At least one image", about: "The product has at least one image.", repeatable: false },
-  { kind: "alt", label: "Image alt text", about: "Every image has alt text.", repeatable: false },
-  { kind: "spaces", label: "Variant titles have no extra spaces", about: "No variant title or option value starts or ends with a space.", repeatable: false },
-  { kind: "lengthSeater", label: "Length and seater filled", about: "The length and seater metafields (set in the metafield keys below) are filled on every variant.", repeatable: false },
-  { kind: "seo", label: "SEO title and description", about: "Both the SEO title and the SEO description are set.", repeatable: false },
-  { kind: "lead", label: "Lead time set", about: "The lead-time metafields (set in the metafield keys below) are filled.", repeatable: false },
-  { kind: "price", label: "Price above zero", about: "Every variant is priced above zero.", repeatable: false },
-  { kind: "market", label: "Published to at least one market", about: "The product is in at least one market catalogue.", repeatable: false },
-  { kind: "metafield", label: "Metafield filled", about: "A metafield you choose must not be empty.", repeatable: true },
-];
+const CHECK_LABEL: Record<CheckKind, string> = {
+  image: "At least one image",
+  alt: "Image alt text",
+  spaces: "Variant titles have no extra spaces",
+  lengthSeater: "Length and seater filled",
+  seo: "SEO title and description",
+  lead: "Lead time set",
+  price: "Price above zero",
+  market: "Published to at least one market",
+  metafield: "Metafield filled",
+};
 
-export const checkLabel = (kind: CheckKind): string => CHECK_CATALOGUE.find((c) => c.kind === kind)?.label ?? kind;
+const CHECK_ABOUT: Record<CheckKind, string> = {
+  image: "The product has at least one image.",
+  alt: "Every image has alt text.",
+  spaces: "No variant title or option value starts or ends with a space.",
+  lengthSeater: "The length and seater metafields (set in the metafield keys below) are filled on every variant.",
+  seo: "Both the SEO title and the SEO description are set.",
+  lead: "The lead-time metafields (set in the metafield keys below) are filled.",
+  price: "Every variant is priced above zero.",
+  market: "The product is in at least one market catalogue.",
+  metafield: "A metafield you choose must not be empty.",
+};
+
+/** Only the Settings page and the tests use this list; the blocks use `checkLabel`. */
+export const CHECK_CATALOGUE: { kind: CheckKind; label: string; about: string; repeatable: boolean }[] = CHECK_KINDS.map((kind) => ({ kind, label: CHECK_LABEL[kind], about: CHECK_ABOUT[kind], repeatable: kind === "metafield" }));
+
+export const checkLabel = (kind: CheckKind): string => CHECK_LABEL[kind] ?? kind;
 
 /** The id of a custom metafield check. */
 export const customCheckId = (f: Pick<FieldRef, "namespace" | "key" | "owner">) => `mf:${f.owner}:${f.namespace}.${f.key}`;
@@ -128,11 +175,16 @@ export function defaultSettings(): BlockSettings {
       fields: { length: REQUIRED_FIELDS.length.map(ref), seater: REQUIRED_FIELDS.seater.map(ref), leadTime: REQUIRED_FIELDS.leadTime.map(ref) },
     },
     links: { previewThemeId: PREVIEW_THEME_ID, previewMarket: PREVIEW_MARKET_KEY },
-    markets: MARKETS.map((m) => ({ key: m.key, label: m.label, country: m.country, domain: m.domain, stayUs: Boolean(m.stayUs), marketHandle: m.marketHandle ?? "", enabled: true })),
+    markets: MARKETS.map((m) => ({ key: m.key, label: m.label, country: m.country, domain: m.domain, stayUs: Boolean(m.stayUs), marketHandle: m.marketHandle ?? "", enabled: true, locale: m.locale ?? "" })),
     sale: { badgeNamespace: SALE_BADGE.namespace, badgeKey: SALE_BADGE.key, collectionHandle: SALE_COLLECTION_HANDLE },
     collections: { showTags: true, showType: true },
     activity: { eventsLimit: EVENTS_LIMIT },
     adaptations: [],
+    groups: defaultGroups(),
+    thresholds: defaultThresholds(),
+    themeFields: defaultThemeFields(),
+    helpers: defaultHelpers(),
+    records: defaultRecords(),
   };
 }
 
@@ -242,6 +294,7 @@ export function problemsOf(s: BlockSettings): Problem[] {
     const d = domainProblem(m.domain);
     if (d) out.push({ path: `markets.${i}.domain`, message: d });
     if (m.marketHandle !== "" && !HANDLE_RE.test(m.marketHandle)) out.push({ path: `markets.${i}.marketHandle`, message: "A market handle has lowercase letters, digits and dashes." });
+    if (m.locale !== "" && !LOCALE_RE.test(m.locale)) out.push({ path: `markets.${i}.locale`, message: "A language code such as fr or de-CH. Leave it empty for the store's main language." });
   });
   if (s.markets.length === 0) out.push({ path: "markets", message: "Keep at least one market." });
   if (s.markets.length > 20) out.push({ path: "markets", message: "Up to 20 markets." });
@@ -266,6 +319,8 @@ export function problemsOf(s: BlockSettings): Problem[] {
     if (pairs.has(k)) out.push({ path: `adaptations.${i}`, message: "This adaptation is listed twice." });
     pairs.add(k);
   });
+
+  out.push(...healthProblems(s, keys));
 
   return out;
 }
@@ -340,6 +395,75 @@ function coerceList<T>(v: unknown, one: (x: unknown) => T | null): T[] | null {
   return out;
 }
 
+const strings = (v: unknown): string[] | null => coerceList(v, (x) => (str(x) ? x : null));
+const num = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+function coerceFlags<K extends string>(v: unknown, keys: readonly K[]): Record<K, boolean> | null {
+  if (!isObj(v)) return null;
+  const out = {} as Record<K, boolean>;
+  for (const k of keys) {
+    if (!bool(v[k])) return null;
+    out[k] = v[k] as boolean;
+  }
+  return out;
+}
+
+function coerceGroups(v: unknown): GroupsSetting | null {
+  if (!isObj(v) || !isObj(v.profiles)) return null;
+  const groups = coerceFlags(v.groups, GROUPS);
+  const disabledRules = strings(v.disabledRules);
+  if (!groups || !disabledRules) return null;
+  const profiles = {} as Record<ProfileId, Record<GroupId, boolean>>;
+  for (const p of PROFILES) {
+    const row = coerceFlags((v.profiles as Record<string, unknown>)[p], GROUPS);
+    if (!row) return null;
+    profiles[p] = row;
+  }
+  return { groups, profiles, disabledRules };
+}
+
+function coerceThresholds(v: unknown): Thresholds | null {
+  if (!isObj(v) || !isObj(v.weights)) return null;
+  const { seoTitleMax, seoDescMin, seoDescMax, minImages, altTarget, primaryMarket } = v;
+  const w = v.weights;
+  if (![seoTitleMax, seoDescMin, seoDescMax, minImages, altTarget, w.blocks, w.hurts, w.nice].every(num) || !str(primaryMarket)) return null;
+  return { seoTitleMax: seoTitleMax as number, seoDescMin: seoDescMin as number, seoDescMax: seoDescMax as number, minImages: minImages as number, altTarget: altTarget as number, weights: { blocks: w.blocks as number, hurts: w.hurts as number, nice: w.nice as number }, primaryMarket };
+}
+
+function coerceThemeField(x: unknown): ThemeField | null {
+  if (!isObj(x) || !str(x.id) || !str(x.label) || !str(x.namespace) || !str(x.key) || !bool(x.on)) return null;
+  if (x.owner !== "product" && x.owner !== "variant") return null;
+  if (!str(x.rule) || !(THEME_RULES as readonly string[]).includes(x.rule)) return null;
+  if (!str(x.severity) || !(SEVERITIES as readonly string[]).includes(x.severity)) return null;
+  const profiles = strings(x.profiles);
+  if (!profiles) return null;
+  let other: ThemeField["other"];
+  if (x.other !== undefined) {
+    if (!isObj(x.other) || !str(x.other.namespace) || !str(x.other.key)) return null;
+    other = { namespace: x.other.namespace, key: x.other.key };
+  }
+  return { id: x.id, label: x.label, namespace: x.namespace, key: x.key, owner: x.owner, rule: x.rule as ThemeRule, profiles: profiles as ProfileId[], severity: x.severity as Severity, on: x.on, ...(other ? { other } : {}) };
+}
+
+function coerceHelpers(v: unknown): HelpersSetting | null {
+  if (!isObj(v)) return null;
+  const types = strings(v.types);
+  const tags = strings(v.tags);
+  const titlePatterns = strings(v.titlePatterns);
+  const bundleTypes = strings(v.bundleTypes);
+  const bundleTags = strings(v.bundleTags);
+  const expectedCategories = strings(v.expectedCategories);
+  const woodNames = strings(v.woodNames);
+  return types && tags && titlePatterns && bundleTypes && bundleTags && expectedCategories && woodNames ? { types, tags, titlePatterns, bundleTypes, bundleTags, expectedCategories, woodNames } : null;
+}
+
+function coerceRecords(v: unknown): RecordsSetting | null {
+  if (!isObj(v) || !str(v.swatchType) || !str(v.deliveryType) || !str(v.designType)) return null;
+  const swatchField = coerceField(v.swatchField);
+  const hideField = coerceField(v.hideField);
+  return swatchField && hideField ? { swatchType: v.swatchType, deliveryType: v.deliveryType, designType: v.designType, swatchField, hideField } : null;
+}
+
 const COERCE: { [K in SectionId]: (v: unknown) => BlockSettings[K] | null } = {
   languages: (v) => coerceList(v, (x) => (isObj(x) && str(x.code) && str(x.label) ? { code: x.code, label: x.label } : null)),
   translation: (v) => {
@@ -371,13 +495,18 @@ const COERCE: { [K in SectionId]: (v: unknown) => BlockSettings[K] | null } = {
   markets: (v) =>
     coerceList(v, (x) =>
       isObj(x) && str(x.key) && str(x.label) && str(x.country) && str(x.domain) && bool(x.stayUs) && str(x.marketHandle) && bool(x.enabled)
-        ? { key: x.key, label: x.label, country: x.country, domain: x.domain, stayUs: x.stayUs, marketHandle: x.marketHandle, enabled: x.enabled }
+        ? { key: x.key, label: x.label, country: x.country, domain: x.domain, stayUs: x.stayUs, marketHandle: x.marketHandle, enabled: x.enabled, locale: str(x.locale) ? x.locale : (MARKETS.find((m) => m.key === x.key)?.locale ?? "") }
         : null,
     ),
   sale: (v) => (isObj(v) && str(v.badgeNamespace) && str(v.badgeKey) && str(v.collectionHandle) ? { badgeNamespace: v.badgeNamespace, badgeKey: v.badgeKey, collectionHandle: v.collectionHandle } : null),
   collections: (v) => (isObj(v) && bool(v.showTags) && bool(v.showType) ? { showTags: v.showTags, showType: v.showType } : null),
   activity: (v) => (isObj(v) && typeof v.eventsLimit === "number" ? { eventsLimit: v.eventsLimit } : null),
   adaptations: (v) => coerceList(v, (x) => (isObj(x) && str(x.locale) && str(x.marketId) && str(x.marketName) ? { locale: x.locale, marketId: x.marketId, marketName: x.marketName } : null)),
+  groups: coerceGroups,
+  thresholds: coerceThresholds,
+  themeFields: (v) => coerceList(v, coerceThemeField),
+  helpers: coerceHelpers,
+  records: coerceRecords,
 };
 
 const SECTION_NAME: Record<SectionId, string> = {
@@ -390,6 +519,11 @@ const SECTION_NAME: Record<SectionId, string> = {
   collections: "Collections and tags",
   activity: "Recent activity",
   adaptations: "Market adaptations",
+  groups: "Health check groups",
+  thresholds: "Thresholds",
+  themeFields: "Theme fields",
+  helpers: "Helper product rules",
+  records: "Linked records",
 };
 export const sectionName = (id: SectionId) => SECTION_NAME[id];
 
@@ -398,7 +532,28 @@ export const sectionName = (id: SectionId) => SECTION_NAME[id];
  * A section that is missing takes its default quietly (an older save). A section that is wrong takes its default and
  * is reported in `problems`, so one bad part does not hide the rest.
  */
-export function parseSettings(raw: unknown): ParseResult {
+/**
+ * Version 1 -> 2. The sections that did not exist take their defaults (parseSettings does that for every missing
+ * section); what is added here is the one thing a default cannot know: a single check the person had switched off in
+ * version 1 stays off (the health groups have their own list of switched-off checks). Everything else is kept as saved.
+ * Pure: returns a new object.
+ */
+export function migrateSettings(data: Record<string, unknown>): Record<string, unknown> {
+  const version = typeof data.version === "number" ? data.version : 1;
+  if (version >= SETTINGS_VERSION) return data;
+  const out: Record<string, unknown> = { ...data, version: SETTINGS_VERSION };
+  const quality = data.quality;
+  if (data.groups === undefined && isObj(quality) && arr(quality.checks)) {
+    const off = new Set<string>();
+    for (const c of quality.checks) {
+      if (isObj(c) && c.on === false && str(c.kind)) for (const id of LEGACY_CHECK_RULES[c.kind] ?? []) off.add(id);
+    }
+    if (off.size) out.groups = { ...defaultGroups(), disabledRules: [...off] };
+  }
+  return out;
+}
+
+export function parseWith(raw: unknown, validate: (s: BlockSettings) => Problem[]): ParseResult {
   const base = defaultSettings();
   if (raw === null || raw === undefined || raw === "") return { settings: base, source: "default", problems: [] };
   let data: unknown = raw;
@@ -414,12 +569,13 @@ export function parseSettings(raw: unknown): ParseResult {
   if (typeof data.version === "number" && data.version > SETTINGS_VERSION) {
     return { settings: base, source: "invalid", problems: [`The saved settings are version ${data.version}, newer than this app understands.`] };
   }
+  const saved = migrateSettings(data);
 
   const problems: string[] = [];
   const out = structuredClone(base) as Record<SectionId, unknown>;
   for (const id of SECTIONS) {
-    if (data[id] === undefined) continue;
-    const coerced = COERCE[id](data[id]);
+    if (saved[id] === undefined) continue;
+    const coerced = COERCE[id](saved[id]);
     if (coerced === null) {
       problems.push(`${SECTION_NAME[id]}: the saved values are not in the right shape.`);
       continue;
@@ -427,7 +583,7 @@ export function parseSettings(raw: unknown): ParseResult {
     out[id] = coerced;
     // Value rules, judged on the whole object with this section replaced.
     const candidate = { ...(base as Record<SectionId, unknown>), [id]: coerced } as unknown as BlockSettings;
-    const bad = problemsFor(problemsOf(candidate), id);
+    const bad = problemsFor(validate(candidate), id);
     if (bad.length) {
       problems.push(`${SECTION_NAME[id]}: ${bad[0]!.message}`);
       out[id] = structuredClone(base[id]);
@@ -437,6 +593,31 @@ export function parseSettings(raw: unknown): ParseResult {
   // A preview market that no longer exists falls back with the markets list that is in use.
   if (settings.links.previewMarket !== "" && !settings.markets.some((m) => m.key === settings.links.previewMarket)) settings.links = { ...settings.links, previewMarket: settings.markets[0]?.key ?? "" };
   return { settings, source: problems.length ? "invalid" : "saved", problems };
+}
+
+/** Reads stored settings with every value rule (the Settings page and the tests). */
+export const parseSettings = (raw: unknown): ParseResult => parseWith(raw, problemsOf);
+
+/**
+ * The few value rules the blocks apply when they read the settings: the ones that would break a request (language and
+ * country codes). The full rules (problemsOf) run on the Settings page before anything is saved, and they are kept out
+ * of the blocks to keep the bundles small.
+ */
+export function problemsForBlocks(s: BlockSettings): Problem[] {
+  const out: Problem[] = [];
+  if (s.languages.length === 0) out.push({ path: "languages", message: "Choose at least one language." });
+  s.languages.forEach((l, i) => {
+    if (!LOCALE_RE.test(l.code)) out.push({ path: `languages.${i}.code`, message: `"${l.code}" is not a language code.` });
+  });
+  if (s.markets.length === 0) out.push({ path: "markets", message: "Keep at least one market." });
+  s.markets.forEach((m, i) => {
+    if (!COUNTRY_RE.test(m.country)) out.push({ path: `markets.${i}.country`, message: "A two-letter country code in capitals, for example GB." });
+    if (m.locale !== "" && !LOCALE_RE.test(m.locale)) out.push({ path: `markets.${i}.locale`, message: "A language code such as fr or de-CH." });
+  });
+  s.adaptations.forEach((a, i) => {
+    if (!LOCALE_RE.test(a.locale)) out.push({ path: `adaptations.${i}.locale`, message: `"${a.locale}" is not a language code.` });
+  });
+  return out;
 }
 
 export const serializeSettings = (s: BlockSettings): string => JSON.stringify({ ...s, version: SETTINGS_VERSION });
@@ -462,7 +643,7 @@ export async function readSettings(read: (query: string) => Promise<{ data: Sett
     if (error && !data) {
       return { settings: defaultSettings(), source: "unreadable", problems: [error.message], notice: "Settings could not be read, so the default settings are used." };
     }
-    const result = parseSettings(data?.currentAppInstallation?.metafield?.value ?? null);
+    const result = parseWith(data?.currentAppInstallation?.metafield?.value ?? null, problemsForBlocks);
     return { ...result, notice: result.source === "invalid" ? "Some saved settings could not be used, so the defaults are used for them. Open Settings in the app to fix it." : null };
   } catch (e) {
     return { settings: defaultSettings(), source: "unreadable", problems: [e instanceof Error ? e.message : String(e)], notice: "Settings could not be read, so the default settings are used." };
@@ -476,7 +657,7 @@ export const settingsOf = (ctx: { settings?: BlockSettings }): BlockSettings => 
 
 /** The markets the blocks list, in the shape the block code uses. */
 export function marketDefs(s: BlockSettings): MarketDef[] {
-  return enabledMarkets(s).map((m) => ({ key: m.key, label: m.label, country: m.country, domain: m.domain, stayUs: m.stayUs, ...(m.marketHandle ? { marketHandle: m.marketHandle } : {}) }));
+  return enabledMarkets(s).map((m) => ({ key: m.key, label: m.label, country: m.country, domain: m.domain, stayUs: m.stayUs, ...(m.marketHandle ? { marketHandle: m.marketHandle } : {}), ...(m.locale ? { locale: m.locale } : {}) }));
 }
 
 /** Countries of the listed markets, each once. */

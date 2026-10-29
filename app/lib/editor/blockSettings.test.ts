@@ -41,7 +41,7 @@ describe("tabs and problems", () => {
     expect(problemTab("adaptations.0.marketId")).toBe("adaptations");
   });
   it("there is a tab for each block and one for adaptations", () => {
-    expect(SETTINGS_TABS.map((t) => t.id)).toEqual(["translation", "quality", "links", "markets", "sale", "collections", "activity", "adaptations"]);
+    expect(SETTINGS_TABS.map((t) => t.id)).toEqual(["translation", "groups", "thresholds", "themeFields", "helpers", "records", "quality", "links", "markets", "sale", "collections", "activity", "adaptations"]);
   });
 });
 
@@ -173,5 +173,80 @@ describe("saveBlockSettings: the password gate, the recheck and the read-back", 
   it("notices when the read-back is not what was sent", async () => {
     const { gql } = fakeStore(null, { keepOld: true });
     await expect(runUnlocked(() => saveBlockSettings(gql, input(null)))).rejects.toThrow("do not match");
+  });
+});
+
+describe("the health tabs", () => {
+  it("problems at the new paths land on their tab", () => {
+    expect(problemTab("groups.disabledRules")).toBe("groups");
+    expect(problemTab("thresholds.seoTitleMax")).toBe("thresholds");
+    expect(problemTab("themeFields.2.key")).toBe("themeFields");
+    expect(problemTab("helpers.types.0")).toBe("helpers");
+    expect(problemTab("records.swatchType")).toBe("records");
+    expect(problemTab("markets.1.locale")).toBe("markets");
+  });
+  it("each new tab resets only itself", () => {
+    const changed = make((s) => {
+      s.groups.groups.seo = false;
+      s.thresholds.minImages = 4;
+      s.themeFields.pop();
+      s.helpers.types = ["x"];
+      s.records.designType = "";
+    });
+    expect(resetTab(changed, "groups").groups).toEqual(defaultSettings().groups);
+    expect(resetTab(changed, "groups").thresholds.minImages).toBe(4);
+    expect(resetTab(changed, "thresholds").thresholds.minImages).toBe(1);
+    expect(resetTab(changed, "themeFields").themeFields).toHaveLength(defaultSettings().themeFields.length);
+    expect(resetTab(changed, "helpers").helpers.types).toEqual(defaultSettings().helpers.types);
+    expect(resetTab(changed, "records").records.designType).toBe("design_customisation");
+    expect(tabIsDefault(changed, "records")).toBe(false);
+    expect(tabIsDefault(resetTab(changed, "records"), "records")).toBe(true);
+  });
+  it("the review says in words what changed in groups, thresholds, theme fields, helpers and records", () => {
+    const after = make((s) => {
+      s.groups.groups.seo = false;
+      s.groups.profiles.option.images = true;
+      s.groups.disabledRules = ["variants.sku"];
+      s.thresholds.seoTitleMax = 70;
+      s.thresholds.weights.nice = 0;
+      s.themeFields[0]!.on = false;
+      s.themeFields.pop();
+      s.helpers.expectedCategories = ["Tables", "Chairs"];
+      s.records.deliveryType = "";
+      s.markets[4]!.locale = "fr";
+    });
+    const lines = diffSettings(defaultSettings(), after);
+    const text = lines.map((l) => `${l.tab}|${l.label}|${l.from}|${l.to}`);
+    expect(text).toContain("groups|SEO group|on|off");
+    expect(text).toContain("groups|Images for option product|off|on");
+    expect(text).toContain("groups|Single check: SKU is filled|on|off");
+    expect(text).toContain("thresholds|SEO title, longest|60|70");
+    expect(text).toContain("thresholds|Score weight: Nice to have|1|0");
+    expect(text.some((t) => t.startsWith("themeFields|Theme field: Tag line|on,"))).toBe(true);
+    expect(text.some((t) => t.startsWith("themeFields|Theme field: SEO hidden flag|") && t.endsWith("|removed"))).toBe(true);
+    expect(text).toContain("helpers|Expected product Types|none|Tables, Chairs");
+    expect(text).toContain("records|Delivery-time record type|build_and_delivery_time|(empty)");
+    expect(text).toContain("markets|UK language|(empty)|fr");
+    expect(diffSettings(defaultSettings(), defaultSettings())).toEqual([]);
+  });
+  it("new settings go through the guarded save and come back the same", async () => {
+    const store = fakeStore(null);
+    const next = make((s) => {
+      s.groups.groups.seo = false;
+      s.thresholds.minImages = 3;
+      s.helpers.tags = ["helper"];
+    });
+    await runUnlocked(() => saveBlockSettings(store.gql, { installationId: "gid://shopify/AppInstallation/1", expectedRaw: null, next }));
+    const back = parseSettings(store.state.raw);
+    expect(back.source).toBe("saved");
+    expect(back.settings.groups.groups.seo).toBe(false);
+    expect(back.settings.thresholds.minImages).toBe(3);
+    expect(JSON.parse(store.state.raw!).version).toBe(2);
+  });
+  it("a value outside its rule is refused before anything is sent", async () => {
+    const store = fakeStore(null);
+    const next = make((s) => (s.thresholds.seoDescMin = 400));
+    await expect(runUnlocked(() => saveBlockSettings(store.gql, { installationId: "x", expectedRaw: null, next }))).rejects.toThrow(/Nothing was saved/);
+    expect(store.state.sets).toBe(0);
   });
 });

@@ -2,7 +2,7 @@
 
 Read this first in every session. It is the standing context for this repo. Keep it short and true:
 when a decision, rule or fact here changes, change this file in the same piece of work.
-Last reviewed: 2026-10-28 (Edit product + Bulk edit pages added; see "Product editor" and "Open work").
+Last reviewed: 2026-10-29 (blocks upgrade: 11 Product Insights blocks, settings v2; see "Blocks upgrade").
 
 ## What this is
 
@@ -63,7 +63,7 @@ The app reads live from Shopify every time. Shopify is the source of truth.
 | Repo | GitHub `hasanirshad/AD-Regional-Products`, branch `master` |
 | Cloudflare build | `npm run build`, output `build/client`, env `SHOPIFY_API_KEY` (client id), `NODE_VERSION=22` |
 | Distribution | Custom distribution, one link = one store. Another store needs another app (`npx shopify app config link`) |
-| Scopes | `read_inventory, read_locations, read_markets, read_products, read_publications, read_shipping, read_themes, read_translations, read_locales, write_inventory, write_products, write_publications, write_shipping, write_translations` (**`read_locales` and `write_translations` added 2026-10-28 for the product editor: need `npm run deploy` and approval in the store**; **`read_themes`, `read_inventory`, `write_inventory`, `write_products` added 2026-10-26 and `read_translations` added 2026-10-27: need `npm run deploy` and approval in the store**; until then the Storefront links page asks for a theme id by hand) |
+| Scopes | `read_inventory, read_locations, read_markets, read_products, read_publications, read_shipping, read_themes, read_translations, read_locales, read_metaobjects, read_metaobject_definitions, write_inventory, write_products, write_publications, write_shipping, write_translations` (**`read_metaobjects` and `read_metaobject_definitions` added 2026-10-29 for the linked-record checks and "Detect from this store": need `npm run deploy` and approval in the store**; **`read_locales` and `write_translations` added 2026-10-28 for the product editor: need `npm run deploy` and approval in the store**; **`read_themes`, `read_inventory`, `write_inventory`, `write_products` added 2026-10-26 and `read_translations` added 2026-10-27: need `npm run deploy` and approval in the store**; until then the Storefront links page asks for a theme id by hand) |
 | Admin API | `2026-07` via direct API access (`shopify:admin/api/graphql.json`), online mode |
 | Release config | `npm run deploy` (= `shopify app deploy --config production`); needed after scope/toml changes |
 
@@ -123,10 +123,10 @@ app/
                                  blockSettings (tabs, reset, diff, guarded save), blockPreview (preview of a block on sample data), locales (slots + adaptations)
 scripts/preload.mjs              modulepreload hints (ROUTE_IDS = views/layout, views/overview)
 scripts/check-extensions.mjs     builds each Product Insights block (esbuild), 64 KB limit, unique handle/uid/name
-extensions/                      Product Insights: 7 read-only admin blocks (Preact, own tsconfig). See "Product Insights blocks" below
+extensions/                      Product Insights: 11 read-only admin blocks (Preact, own tsconfig). See "Product Insights blocks" and "Blocks upgrade" below
 public/_headers                  frame-ancestors for Shopify + immutable cache for /assets/*
 ```
-568 tests in 46 files (`app/lib/**/*.test.ts` and `extensions/**/*.test.*`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
+677 tests in 50 files (`app/lib/**/*.test.ts` and `extensions/**/*.test.*`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
 which runs the real `applyMove` / `runPlan` against a fake Shopify (incl. a silent no-op). `testkit.ts` has the builders.
 No UI tests in the repo (the editor pages had a one-off Chromium smoke run, see `docs/PRODUCT-EDITOR.md`); no test for `shopify-data` queries (they only run inside the admin).
 
@@ -199,7 +199,7 @@ Zones (30 per location group) are flagged (`zonesTruncated`).
 ## Commands
 
 `npm test` (vitest), `npm run typecheck`, `npm run build`, `npm run deploy`. Before any handoff run
-test + typecheck + build. Expected: 478 tests pass, typecheck clean (`typecheck` now also checks `extensions/`). `npm run check:extensions` builds the seven blocks and checks Shopify's 64 KB limit.
+test + typecheck + build. Expected: 677 tests pass, typecheck clean (`typecheck` now also checks `extensions/`). `npm run check:extensions` builds the eleven blocks and checks Shopify's 64 KB limit.
 
 ## Channels & catalogues page (added 2026-10-26)
 
@@ -269,9 +269,21 @@ test + typecheck + build. Expected: 478 tests pass, typecheck clean (`typecheck`
 - Export: CSV, one row per product and market: Product, Market, Store link, Admin link, Published in market. Admin link =
   `https://admin.shopify.com/store/<myshopify handle>/products/<id>`.
 
+## Blocks upgrade (2026-10-29)
+
+- Four new read-only blocks (Product health, Storefront readiness, Options and swatches, Content snapshot) and three upgraded (Data quality = grouped view of
+  the same engine, Market availability on the shared market reader, Sale and badge says "On sale" with the percent range and flags only odd cases).
+  Full note, rules, bundle sizes (two blocks at 62.8 KB of 64) and the Not verified list: `docs/PRODUCT-INSIGHTS.md` ("Blocks upgrade").
+- One engine: `extensions/shared/{facts,markets,records,rules,healthSettings,healthLoad,healthView}`. Profiles Real product / Option product / Bundle guessed from helper
+  rules (a check that cannot apply is not shown). Score weights 3/2/1, verdict "Ready" / "N to fix before launch". Do not add code to `rules.ts`, `facts.ts` or `healthSettings.ts` without running `check:extensions`.
+- Settings **version 2** (same `$app`/`block_settings` metafield): sections `groups`, `thresholds`, `themeFields`, `helpers`, `records` + `markets[].locale`; `migrateSettings` fills
+  them from the defaults. Settings page: 13 tabs, "Detect from this store" (`lib/editor/detect.ts`, review list, draft only, password to save). `docs/BLOCK-SETTINGS.md`.
+- Blocks read the settings with `parseWith(..., problemsForBlocks)` (lite rules, keeps the bundle small); the app uses `parseSettings` (full rules).
+- Needs `npm run deploy` (new scopes). The linked-record checks say "could not be read" until approved. Nothing has run against the real store.
+
 ## Product Insights blocks (added 2026-10-27)
 
-Seven separate **read-only** admin blocks on the product details page (target `admin.product-details.block.render`, API 2026-10,
+Seven separate **read-only** admin blocks on the product details page (four more were added on 2026-10-29, see "Blocks upgrade") (target `admin.product-details.block.render`, API 2026-10,
 Preact, `s-*` components), in `extensions/`: Market Availability, Translation Status, Sale and Badge, Data Quality Checklist,
 Collections and Tags, Quick Links, Recent Activity. No server, no routes, no writes, no write scopes; they call the Admin API
 with `shopify.query`. Full note (scopes, constants, API gaps, deploy, test plan): `docs/PRODUCT-INSIGHTS.md`.
@@ -300,6 +312,9 @@ with `shopify.query`. Full note (scopes, constants, API gaps, deploy, test plan)
   a failed step halts the rest for that product) → read-back. `lib/editor/fake.ts` is the fake Shopify used by the tests.
 - Gotcha: metafield drafts live in a separate map so half-typed text is never overwritten; `TextBox` attaches its own `input` and `change` listeners.
 - Unverified on the real store: see the list in `docs/PRODUCT-EDITOR.md`. Run its test plan before trusting a write.
+- **Bulk edit Variants mode (2026-10-30):** switch "Edit variants" -> choose products -> choose columns (variant fields, variant metafields, their translations per
+  language and market adaptation) -> one row per variant. State `views/bulk-variants-state.ts` (in the layout as `variantBulk`), pure part `lib/editor/bulkVariants.ts`,
+  UI `components/editor/VariantBulk.tsx`. Same review / password / recheck / read-back / Undo. A translation needs a saved metafield value (its id). Max 200 products, 250 variants each.
 
 ## Block settings and market adaptations (added 2026-10-28)
 

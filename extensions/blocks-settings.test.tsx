@@ -8,8 +8,6 @@ import * as market from "./market-availability/src/logic";
 import * as translation from "./translation-status/src/logic";
 import * as sale from "./sale-badge/src/logic";
 import { View as SaleView } from "./sale-badge/src/Block";
-import * as quality from "./data-quality/src/logic";
-import { View as QualityView } from "./data-quality/src/Block";
 import * as collections from "./collections-tags/src/logic";
 import { View as CollectionsView } from "./collections-tags/src/Block";
 import * as links from "./quick-links/src/logic";
@@ -81,68 +79,6 @@ describe("Translation status with settings", () => {
   });
 });
 
-describe("Data quality with settings", () => {
-  const variant = (over: Record<string, unknown> = {}) => ({ id: "v", title: "Small", price: "100", selectedOptions: [], ...over });
-  const product = (over: Record<string, unknown> = {}) => ({
-    id: PRODUCT,
-    status: "ACTIVE",
-    seo: { title: "t", description: "d" },
-    media: { nodes: [{ alt: "a", mediaContentType: "IMAGE" }], pageInfo: { hasNextPage: false } },
-    resourcePublicationsV2: { nodes: [{ publication: { id: "p" } }] },
-    variants: { nodes: [variant()], pageInfo: { hasNextPage: false } },
-    ...over,
-  });
-
-  it("a switched-off check is not shown or counted", () => {
-    const s = make((x) => (x.quality.checks.find((c) => c.id === "seo")!.on = false));
-    const d = quality.evaluate(product({ seo: { title: "", description: "" } }) as never, [variant()] as never, [], s);
-    expect(d.checks.map((c) => c.id)).not.toContain("seo");
-    expect(d.checks).toHaveLength(7);
-  });
-
-  it("checks follow the order of the list", () => {
-    const s = make((x) => (x.quality.checks = x.quality.checks.slice().reverse()));
-    const d = quality.evaluate(product() as never, [variant()] as never, [], s);
-    expect(d.checks[0]!.id).toBe("market");
-  });
-
-  it("the lead-time check works once its metafield keys are set (this fixes 'Not configured')", () => {
-    const withField = make((x) => (x.quality.fields.leadTime = [{ label: "Lead time", namespace: "custom", key: "lead_time", owner: "product" }]));
-    const empty = quality.evaluate(product({ m_custom_lead_time: null }) as never, [variant()] as never, [], withField);
-    expect(empty.checks.find((c) => c.id === "lead")).toMatchObject({ status: "fail", reason: "Lead time is empty." });
-    const filled = quality.evaluate(product({ m_custom_lead_time: { value: "6 weeks" } }) as never, [variant()] as never, [], withField);
-    expect(filled.checks.find((c) => c.id === "lead")!.status).toBe("pass");
-    const none = quality.evaluate(product() as never, [variant()] as never, []);
-    expect(none.checks.find((c) => c.id === "lead")).toMatchObject({ status: "skipped" });
-  });
-
-  it("a custom 'metafield must not be empty' check, on a product or on every variant", () => {
-    const s = make((x) => {
-      x.quality.checks.push(
-        { id: "mf:product:custom.care", kind: "metafield", label: "Care text filled", on: true, field: { label: "Care", namespace: "custom", key: "care", owner: "product" } },
-        { id: "mf:variant:custom.colour", kind: "metafield", label: "Colour filled", on: true, field: { label: "Colour", namespace: "custom", key: "colour", owner: "variant" } },
-      );
-    });
-    const d = quality.evaluate(product({ m_custom_care: { value: " " } }) as never, [variant({ m_custom_colour: { value: "Oak" } }), variant({ id: "v2", m_custom_colour: null })] as never, [], s);
-    expect(d.checks.find((c) => c.id === "mf:product:custom.care")).toMatchObject({ status: "fail", reason: "Care is empty." });
-    expect(d.checks.find((c) => c.id === "mf:variant:custom.colour")).toMatchObject({ status: "fail", reason: "Colour is empty on 1 of 2 variants." });
-    expect(html(<QualityView data={d} />)).toContain("Care text filled");
-  });
-
-  it("asks only for the metafields the switched-on checks need", async () => {
-    const s = make((x) => {
-      x.quality.checks.find((c) => c.id === "lengthSeater")!.on = false;
-      x.quality.fields.leadTime = [{ label: "Lead time", namespace: "custom", key: "lead_time", owner: "product" }];
-      x.quality.checks.push({ id: "mf:product:custom.care", kind: "metafield", label: "Care", on: false, field: { label: "Care", namespace: "custom", key: "care", owner: "product" } });
-    });
-    const { seen } = await run(s, { Quality: () => ({ product: product() }) }, quality.load);
-    const q = seen[0]!.query;
-    expect(q).toContain('metafield(namespace: "custom", key: "lead_time")');
-    expect(q).not.toContain("variant_length");
-    expect(q).not.toContain('"care"');
-  });
-});
-
 describe("Quick links with settings", () => {
   it("uses the saved theme id and domains", async () => {
     const s = make((x) => {
@@ -169,7 +105,7 @@ describe("Market availability with settings", () => {
   });
   it("finds a market by the handle given in the settings", async () => {
     const s = make((x) => {
-      x.markets = [{ key: "EU", label: "Europe", country: "DE", domain: "hardmandesign.de", stayUs: false, marketHandle: "eu", enabled: true }];
+      x.markets = [{ key: "EU", label: "Europe", country: "DE", domain: "hardmandesign.de", stayUs: false, marketHandle: "eu", enabled: true, locale: "" }];
       x.links.previewMarket = "EU";
     });
     const nodes = [{ id: "a", name: "Germany", handle: "germany", status: "ACTIVE", catalogs: { nodes: [{ id: "c1" }] }, conditions: { regionsCondition: { regions: { nodes: [{ __typename: "MarketRegionCountry", code: "DE" }] } } } }, { id: "b", name: "Europe", handle: "eu", status: "ACTIVE", catalogs: { nodes: [{ id: "c2" }] } }];

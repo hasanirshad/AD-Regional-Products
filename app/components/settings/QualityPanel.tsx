@@ -4,6 +4,9 @@ import { SelectField } from "../SelectField";
 import { TextBox } from "../editor/TextBox";
 import { edited, errorAt, ErrorLine, ListRow, MetafieldPicker, moved, Switch, type DefChoice, type PanelProps } from "./widgets";
 
+/** Only these kinds of check still read their own switch: the others (images, alt text, SEO ...) are single checks on the Groups tab. */
+const LIVE: CheckKind[] = ["lengthSeater", "lead", "metafield"];
+
 type Group = "length" | "seater" | "leadTime";
 const GROUPS: { id: Group; title: string; hint: string }[] = [
   { id: "length", title: "Length metafields", hint: "Used by the check “Length and seater filled”." },
@@ -22,7 +25,7 @@ export function QualityPanel(p: PanelProps) {
   const bump = () => setCounter((n) => n + 1);
 
   const present = new Set(checks.map((c) => c.kind));
-  const addable = CHECK_CATALOGUE.filter((c) => c.repeatable || !present.has(c.kind));
+  const addable = CHECK_CATALOGUE.filter((c) => LIVE.includes(c.kind) && (c.repeatable || !present.has(c.kind)));
   const addCheck = (kind: string) => {
     const entry = CHECK_CATALOGUE.find((c) => c.kind === kind);
     if (!entry || kind === "metafield") return; // a metafield check is added with its metafield, below
@@ -47,9 +50,10 @@ export function QualityPanel(p: PanelProps) {
     <s-stack gap="large-100">
       <s-stack gap="small-200">
         <s-heading>Checks</s-heading>
-        <s-text color="subdued">Switch a check off to hide it and leave it out of the count. Remove it to take it out of the list; you can add it back from the list below.</s-text>
-        {checks.length === 0 ? <s-text color="subdued">No checks. The block will say so. Add one below.</s-text> : null}
+        <s-text color="subdued">Product health and Data quality run groups of checks: set those on the Groups and profiles tab. Here are the checks that need metafields chosen by you. Switch one off to hide it and leave it out of the count.</s-text>
+        {checks.filter((c) => LIVE.includes(c.kind)).length === 0 ? <s-text color="subdued">No checks here. Add one below.</s-text> : null}
         {checks.map((c, i) => {
+          if (!LIVE.includes(c.kind)) return null;
           const entry = CHECK_CATALOGUE.find((x) => x.kind === c.kind);
           return (
             <ListRow

@@ -51,6 +51,29 @@ An empty cell means "none" (deletes a metafield or translation). Quick subset fi
 Review shows old → new per row; failures are per row after the run; **Undo** of the last run (shared with Edit product).
 Content filters and value sorting judge only the products loaded so far; the page says how many are still waiting.
 
+## Bulk edit: Variants mode (added 2026-10-30)
+
+A switch at the top of Bulk edit, **Edit variants** (off by default = the product table above). Unsaved edits of the other mode are kept.
+
+1. **Choose products.** The same search and filters as the product table (`BulkFilterPanel`), then tick products (this page, all matching, up to 200).
+   Ticks survive a change of filters.
+2. **Choose columns.** Variant fields (price and compare-at of the primary market, SKU, barcode), **variant metafields** (inline types editable, others shown
+   only) and, for each chosen text / multi-line text / link metafield, a **translation column per chosen language and per market adaptation**. The slots are
+   `shared.slots`, so they follow Block settings > Languages and adaptations (nothing is hard-coded).
+3. **Edit.** One row per variant (Product, Variant, then the columns). Reads are free, with a Stop button. Saving is the shared flow: review old -> new,
+   ticked confirmation, password, recheck, first-product trial, read-back, CSV report, and **Undo**. Labels read like "French · Length · Oak / 180".
+
+Rules and limits:
+- A translation belongs to the SAVED metafield (Shopify's translatable resource is the metafield's id). A variant with no value shows "Save the value first":
+  save the value, then translate it. After a save the table is read again, so the new id is picked up.
+- Reads: 3 products x 100 variants per call, then paging up to **250 variants per product** (more are not shown; the page says which products).
+- No paste-from-spreadsheet and no "copy the source" helper in Variants mode yet. Variant option names / values and inventory are not columns here (Edit product
+  handles them). Tracked and inventory policy are not offered.
+- Code: `lib/editor/bulkVariants.ts` (pure + reads), `views/bulk-variants-state.ts`, `components/editor/{VariantBulk,BulkFilterPanel}.tsx`. 14 new tests against the
+  fake Shopify (`bulkVariants.test.ts`: reads, paging, targets, a full save incl. a market adaptation).
+- NOT verified on the real store: the `nodes(ids:)` read of 3 products x 100 variants under the cost limit, a translation of a VARIANT metafield (and of a market
+  adaptation of it), and the row rendering with the real Polaris components (smoke tests stub them).
+
 ## Where things are saved (decision: storage inside Shopify)
 
 The prompt said "on the shop". The app has no database and no server, so everything it remembers is an **app-owned
@@ -124,7 +147,7 @@ metafield translations (text, multi-line, URL only are offered); `$app` metafiel
 - Market-specific translations (`en@market` style) appear only for the **market adaptations** chosen on the Block settings page (`docs/BLOCK-SETTINGS.md`): each one adds a box in Edit product and a column choice and filter entry in Bulk edit. Unverified on the real store, especially for the main language.
 - Bulk price columns apply to single-variant products only (multi-variant products show "Several variants").
 - Bulk metafield columns are editable only for single inline types; lists, references and rich text are shown only.
-- Bulk has no metafield translations.
+- Bulk (product table) has no metafield translations; Variants mode translates variant metafields (see above).
 - Create product: variants step builds options only for a product that still has the default variant; up to 3 options
   and 100 variants.
 - Category: leaf categories only. Description is edited in the visual editor (HTML view for the code); see "Description editor".

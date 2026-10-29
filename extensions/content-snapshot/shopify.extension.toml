@@ -1,0 +1,12 @@
+api_version = "2026-10"
+
+[[extensions]]
+type = "ui_extension"
+name = "Content snapshot"
+handle = "insights-content-snapshot"
+uid = "9d6a3f47-4c18-4b2e-8e5b-3c7f1a9d5e44"
+description = "Read-only: title, SEO, description, image and theme-field facts at a glance."
+
+  [[extensions.targeting]]
+  target = "admin.product-details.block.render"
+  module = "./src/Block.tsx"

@@ -1,0 +1,12 @@
+api_version = "2026-10"
+
+[[extensions]]
+type = "ui_extension"
+name = "Storefront readiness"
+handle = "insights-storefront-readiness"
+uid = "5a2e7d90-1b63-4c8f-a4d7-8f3b0e6c2d22"
+description = "Read-only: one row per market with published, price, translation and delivery time."
+
+  [[extensions.targeting]]
+  target = "admin.product-details.block.render"
+  module = "./src/Block.tsx"

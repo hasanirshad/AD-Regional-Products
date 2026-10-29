@@ -71,7 +71,7 @@ export function MarketsPanel({ draft, set, problems, markets }: PanelProps) {
     const m = markets.find((x) => x.id === id);
     const country = m?.countries[0]?.code;
     if (!m || !country) return;
-    set(edited(draft, (d) => void d.markets.push({ key: uniqueKey(country, d.markets.map((x) => x.key)), label: m.name, country, domain: "", stayUs: false, marketHandle: "", enabled: true } satisfies MarketSetting)));
+    set(edited(draft, (d) => void d.markets.push({ key: uniqueKey(country, d.markets.map((x) => x.key)), label: m.name, country, domain: "", stayUs: false, marketHandle: "", enabled: true, locale: "" } satisfies MarketSetting)));
     setCounter((n) => n + 1);
   };
 
@@ -110,6 +110,7 @@ export function MarketsPanel({ draft, set, problems, markets }: PanelProps) {
               } error={errorAt(problems, `markets.${i}.key`)} />
             <TextBox label="Name" value={m.label} onChange={(v) => set(edited(draft, (d) => void (d.markets[i]!.label = v)))} error={errorAt(problems, `markets.${i}.label`)} />
             <TextBox label="Country code" value={m.country} onChange={(v) => set(edited(draft, (d) => void (d.markets[i]!.country = v.trim().toUpperCase())))} details="Two letters, for example GB." error={errorAt(problems, `markets.${i}.country`)} />
+            <TextBox label="Language of the market (for translation checks)" value={m.locale} onChange={(v) => set(edited(draft, (d) => void (d.markets[i]!.locale = v.trim())))} details="For example fr or de-CH. Empty = the store's main language." error={errorAt(problems, `markets.${i}.locale`)} />
             <TextBox
               label="Market handle (only if two markets share the country)"
               value={m.marketHandle}

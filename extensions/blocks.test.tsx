@@ -12,7 +12,6 @@ import { View as TranslationView } from "./translation-status/src/Block";
 import * as sale from "./sale-badge/src/logic";
 import { View as SaleView } from "./sale-badge/src/Block";
 import * as quality from "./data-quality/src/logic";
-import { View as QualityView } from "./data-quality/src/Block";
 import * as collections from "./collections-tags/src/logic";
 import { View as CollectionsView } from "./collections-tags/src/Block";
 import * as links from "./quick-links/src/logic";
@@ -194,7 +193,6 @@ describe("Sale and Badge", () => {
     const { data } = await run({ SaleBadge: () => saleProduct({ badge: null, collections: collectionsPage(["new"]) }) }, sale.load);
     const out = html(<SaleView data={data} />);
     expect(out).toContain("not in the &quot;sale&quot; collection");
-    expect(out).toContain("badge is empty");
   });
 
   it("finds the sale collection on a later page of collections", async () => {
@@ -216,72 +214,6 @@ describe("Sale and Badge", () => {
     const out = html(<SaleView data={data} />);
     expect(out).toContain("Translations could not be read");
     expect(out).toContain("20% off");
-  });
-});
-
-describe("Data Quality", () => {
-  const variant = (over: Record<string, unknown> = {}) => ({ id: "v", title: "Small / Oak", price: "100.00", selectedOptions: [{ name: "Size", value: "Small" }, { name: "Wood", value: "Oak" }], m_custom_variant_length: { value: "180" }, m_custom_variant_table_person_space: { value: "6" }, ...over });
-  const good = () => ({
-    id: PRODUCT,
-    status: "ACTIVE",
-    seo: { title: "Oak table", description: "Solid oak" },
-    media: { nodes: [{ alt: "Oak table", mediaContentType: "IMAGE" }], pageInfo: { hasNextPage: false } },
-    resourcePublicationsV2: { nodes: [{ publication: { id: "p" } }] },
-    variants: { nodes: [variant()], pageInfo: { hasNextPage: false, endCursor: null } },
-  });
-
-  it("passes a clean product (lead time is not configured, so 7 of 7)", () => {
-    const d = quality.evaluate(good() as never, good().variants.nodes as never);
-    expect(d.counted).toBe(7);
-    expect(d.passed).toBe(7);
-    expect(d.checks.find((c) => c.id === "lead")).toMatchObject({ status: "skipped" });
-    expect(html(<QualityView data={d} />)).toContain("7 of 7 passed");
-  });
-
-  it("fails each check with a reason", () => {
-    const p = { ...good(), seo: { title: "", description: null }, media: { nodes: [{ alt: "", mediaContentType: "IMAGE" }, { alt: "ok", mediaContentType: "IMAGE" }], pageInfo: { hasNextPage: false } }, resourcePublicationsV2: { nodes: [] } };
-    const variants = [variant({ title: " Small / Oak", m_custom_variant_length: null }), variant({ price: "0.00", m_custom_variant_table_person_space: { value: "  " } })];
-    const d = quality.evaluate(p as never, variants as never);
-    const byId = Object.fromEntries(d.checks.map((c) => [c.id, c]));
-    expect(byId.alt!.reason).toBe("1 of 2 images has no alt text.");
-    expect(byId.spaces!.reason).toContain('" Small / Oak"');
-    expect(byId.lengthSeater!.reason).toBe("Length is empty on 1 of 2 variants; Seater is empty on 1 of 2 variants.");
-    expect(byId.seo!.reason).toBe("SEO title and SEO description not set.");
-    expect(byId.price!.reason).toBe("1 variant priced at 0 or less.");
-    expect(byId.market!.status).toBe("fail");
-    expect(byId.image!.status).toBe("pass");
-    expect(d.passed).toBe(1);
-    const out = html(<QualityView data={d} />);
-    expect(out).toContain("1 of 7 passed");
-    expect(out).toContain("Not configured");
-  });
-
-  it("flags a product with no images, and with option values that have spaces", () => {
-    const p = { ...good(), media: { nodes: [], pageInfo: { hasNextPage: false } } };
-    const v = variant({ selectedOptions: [{ name: "Wood", value: "Oak " }] });
-    const d = quality.evaluate(p as never, [v] as never);
-    expect(d.checks.find((c) => c.id === "image")!.status).toBe("fail");
-    expect(d.checks.find((c) => c.id === "alt")!.reason).toMatch(/No images/);
-    expect(d.checks.find((c) => c.id === "spaces")!.status).toBe("fail");
-  });
-
-  it("reads further pages of variants and notes a cap", async () => {
-    const first = { ...good(), variants: { nodes: [variant({ id: "a" })], pageInfo: { hasNextPage: true, endCursor: "c1" } } };
-    const { data, seen } = await run(
-      {
-        Quality: () => ({ product: first }),
-        QualityVariants: (v) => ({ product: { variants: v.after === "c1" ? { nodes: [variant({ id: "b", price: "0" })], pageInfo: { hasNextPage: false, endCursor: null } } : { nodes: [], pageInfo: { hasNextPage: false } } } }),
-      },
-      quality.load,
-    );
-    expect(seen.map((s) => s.name)).toEqual(["Quality", "QualityVariants"]);
-    expect(data.checks.find((c) => c.id === "price")!.reason).toBe("1 variant priced at 0 or less.");
-  });
-
-  it("asks for the metafields named in the constants", async () => {
-    const { seen } = await run({ Quality: () => ({ product: good() }) }, quality.load);
-    expect(seen[0]!.query).toContain('metafield(namespace: "custom", key: "variant_length")');
-    expect(seen[0]!.query).toContain('metafield(namespace: "custom", key: "variant_table_person_space")');
   });
 });
 
@@ -401,7 +333,7 @@ describe("read only", () => {
     await record({ MarketAvailability: () => ({ product: { id: PRODUCT, status: "ACTIVE" }, markets: { nodes: [] } }) }, market.load);
     await record({ TranslationBase: () => ({ product: { id: PRODUCT, options: [], ns0: { nodes: [] } }, translatableResource: { translatableContent: [] } }) }, translation.load);
     await record({ SaleBadge: () => ({ product: { id: PRODUCT, badge: null, collections: { nodes: [], pageInfo: { hasNextPage: false } } } }) }, sale.load);
-    await record({ Quality: () => ({ product: { id: PRODUCT, status: "ACTIVE", media: { nodes: [], pageInfo: { hasNextPage: false } }, variants: { nodes: [], pageInfo: { hasNextPage: false } } } }) }, quality.load);
+    await record({ FactsProduct: () => ({ product: { id: PRODUCT, handle: "h", title: "T", status: "ACTIVE", media: { nodes: [], pageInfo: { hasNextPage: false } }, variants: { nodes: [], pageInfo: { hasNextPage: false } } } }) }, quality.load);
     await record({ CollectionsTags: () => ({ shop: { myshopifyDomain: "x.myshopify.com" }, product: { tags: [], collections: { nodes: [], pageInfo: { hasNextPage: false } } } }) }, collections.load);
     await record({ QuickLinks: () => ({ shop: { myshopifyDomain: "x.myshopify.com" }, product: { handle: "h", status: "ACTIVE" } }) }, links.load);
     await record({ RecentActivity: () => ({ product: { updatedAt: "2026-10-27T00:00:00Z", events: { nodes: [] } } }) }, activity.load);

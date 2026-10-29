@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultSettings, type BlockSettings } from "../../../extensions/shared/settings";
+import { GROUPS, defaultSettings, type BlockSettings } from "../../../extensions/shared/settings";
 import { previewOf } from "./blockPreview";
 import { slotsWithAdaptations, type ShopLocale } from "./locales";
 
@@ -26,20 +26,46 @@ describe("previews use the real block code on sample data", () => {
     const p = previewOf("translation", s, { known: [{ namespace: "custom", key: "care" }, { namespace: "other", key: "x" }] });
     expect(p.tables[0]!.rows.map((r) => r[0]!.text)).toEqual(["custom.care"]);
   });
-  it("data quality: switched-off checks vanish and lead time shows once its metafield is set", () => {
-    const base = previewOf("quality", defaultSettings());
-    expect(base.tables[0]!.rows.find((r) => r[0]!.text === "Lead time set")![1]!.text).toBe("Not configured");
-    const s = make((x) => {
-      x.quality.checks = x.quality.checks.filter((c) => c.id !== "seo");
-      x.quality.fields.leadTime = [{ label: "Lead time", namespace: "custom", key: "lead_time", owner: "product" }];
-    });
-    const p = previewOf("quality", s);
-    expect(p.tables[0]!.rows.some((r) => r[0]!.text.startsWith("SEO"))).toBe(false);
-    expect(p.tables[0]!.rows.find((r) => r[0]!.text === "Lead time set")![1]!.text).toBe("Fail");
+  it("data quality runs the real engine on a sample product", () => {
+    const p = previewOf("quality", defaultSettings());
+    expect(p.summary).toMatch(/^\d+\/100 · /);
+    const pending = p.tables.find((t) => t.title === "Pending")!;
+    expect(pending.rows.map((r) => r[0]!.text)).toEqual(expect.arrayContaining(["Images have alt text", "SEO title is not too long", "SKU is filled"]));
+    expect(p.tables.map((t) => t.title)).toEqual(expect.arrayContaining(["Basics", "SEO", "Images", "Variants and pricing"]));
   });
-  it("says so when every check is off", () => {
-    const p = previewOf("quality", make((x) => x.quality.checks.forEach((c) => (c.on = false))));
-    expect(p.empty).toContain("No checks");
+  it("a group switched off, or a single check, disappears from the preview", () => {
+    const off = previewOf("groups", make((x) => (x.groups.groups.seo = false)));
+    expect(off.tables.some((t) => t.title === "SEO")).toBe(false);
+    const single = previewOf("groups", make((x) => (x.groups.disabledRules = ["variants.sku"])));
+    expect(single.tables.find((t) => t.title === "Pending")!.rows.some((r) => r[0]!.text === "SKU is filled")).toBe(false);
+  });
+  it("thresholds change the verdict of the sample", () => {
+    const p = previewOf("thresholds", make((x) => (x.thresholds.seoTitleMax = 200)));
+    expect(p.tables.find((t) => t.title === "Pending")!.rows.some((r) => r[0]!.text === "SEO title is not too long")).toBe(false);
+    const strict = previewOf("thresholds", make((x) => (x.thresholds.minImages = 5)));
+    expect(strict.tables.find((t) => t.title === "Pending")!.rows.some((r) => r[0]!.text === "Enough images")).toBe(true);
+  });
+  it("a theme field that is switched off, or one that is filled, is counted", () => {
+    const base = previewOf("themeFields", defaultSettings());
+    const rows = (p: ReturnType<typeof previewOf>) => p.tables.find((t) => t.title === "Theme fields")!.rows.map((r) => r[0]!.text);
+    expect(rows(base)).toContain("Tag line");
+    const off = previewOf("themeFields", make((x) => x.themeFields.forEach((f) => (f.on = false))));
+    expect(rows(off)).not.toContain("Tag line");
+  });
+  it("says so when every group is off", () => {
+    const p = previewOf("groups", make((x) => GROUPS.forEach((g) => (x.groups.groups[g] = false))));
+    expect(p.empty).toContain("No check applies");
+  });
+  it("helper rules show which kind of product a few made-up products are judged as", () => {
+    const p = previewOf("helpers", defaultSettings());
+    const judged = p.tables[0]!.rows.map((r) => [r[0]!.text, r[2]!.text]);
+    expect(judged).toEqual(expect.arrayContaining([["Oak Dining Table", "Real product"], ["Light Oak Finish", "Option product"], ["Dining Set", "Bundle"]]));
+    const custom = previewOf("helpers", make((x) => (x.helpers.types = ["tables"])));
+    expect(custom.tables[0]!.rows.find((r) => r[0]!.text === "Light Oak Finish")![2]!.text).toBe("Option product");
+  });
+  it("linked records list the types in use and say which are skipped", () => {
+    const p = previewOf("records", make((x) => (x.records.designType = "")));
+    expect(p.tables[0]!.rows.find((r) => r[0]!.text === "Design and customisation")![1]!.text).toBe("Not used");
   });
   it("quick links use the saved domains and theme", () => {
     const s = make((x) => {

@@ -1,0 +1,12 @@
+api_version = "2026-10"
+
+[[extensions]]
+type = "ui_extension"
+name = "Options and swatches"
+handle = "insights-options-swatches"
+uid = "7b4c9e13-2f85-4d1a-9c06-1a5d8e3f7b33"
+description = "Read-only: option values with their swatch records, and variants without weight or SKU."
+
+  [[extensions.targeting]]
+  target = "admin.product-details.block.render"
+  module = "./src/Block.tsx"

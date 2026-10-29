@@ -29,6 +29,8 @@ export type ChangeContext = {
   slotLabel: (slot: string) => string;
   locationName: (locationId: string) => string;
   metafieldName: (t: Extract<Target, { kind: "metafield" }>) => string;
+  /** Names the thing a metafield translation belongs to, such as "Length · Oak / 180". Without it the label says "Metafield value". */
+  resourceName?: (t: Extract<Target, { kind: "translation" }>) => string | undefined;
 };
 
 export function labelOf(t: Target, ctx: ChangeContext): string {
@@ -44,7 +46,7 @@ export function labelOf(t: Target, ctx: ChangeContext): string {
     case "stock":
       return `Available · ${ctx.variantTitle(t.variantId)} · ${ctx.locationName(t.locationId)}`;
     case "translation": {
-      const what = t.resource === "metafield" ? `Metafield ${t.field}` : (translationFieldLabel(t.field) ?? t.field);
+      const what = t.resource === "metafield" ? (ctx.resourceName?.(t) ?? `Metafield ${t.field}`) : (translationFieldLabel(t.field) ?? t.field);
       return `${ctx.slotLabel(t.slot)} · ${what}`;
     }
   }

@@ -1,16 +1,8 @@
-import { HIDDEN_MARKETS, type MarketDef } from "../../shared/constants";
+import type { MarketDef } from "../../shared/constants";
+import { findMarket, MARKETS_SELECTION, marketStates, type PublishState, type RawMarket } from "../../shared/markets";
 import { withPricing, type MarketPrice } from "../../shared/pricing";
 import type { LoadContext } from "../../shared/query";
 import { defaultSettings, marketCountries, marketDefs, settingsOf } from "../../shared/settings";
-
-type RawMarket = {
-  id: string;
-  name: string;
-  handle: string;
-  status?: string | null;
-  catalogs?: { nodes: { id: string; title?: string }[] } | null;
-  conditions?: { regionsCondition?: { regions?: { nodes: { __typename?: string; code?: string }[] } | null } | null } | null;
-};
 
 type Raw = {
   product: (Record<string, unknown> & { id: string; status: string; resourcePublicationsV2?: { nodes: { publication?: { catalog?: { id: string } | null } | null }[] } | null }) | null;
@@ -26,19 +18,10 @@ const query = (selection: string) => `query MarketAvailability($id: ID!) {
     }
     ${selection}
   }
-  markets(first: 100) {
-    nodes {
-      id
-      name
-      handle
-      status
-      catalogs(first: 10) { nodes { id title } }
-      conditions { regionsCondition { regions(first: 250) { nodes { __typename ... on MarketRegionCountry { code } } } } }
-    }
-  }
+  ${MARKETS_SELECTION}
 }`;
 
-export type PublishState = "published" | "not-published" | "no-market";
+export { findMarket, type PublishState };
 
 export type MarketRow = {
   def: MarketDef;
@@ -53,23 +36,9 @@ export type MarketRow = {
 
 export type Data = { productStatus: string; rows: MarketRow[]; note: string | null; extrasNote?: string | null };
 
-const isHidden = (m: RawMarket) => HIDDEN_MARKETS.some((h) => h.name === m.name && h.handle === m.handle);
-
-/** The market for a row: by handle when the constants name one, else the first market that contains the country. */
-export function findMarket(def: MarketDef, markets: RawMarket[]): RawMarket | null {
-  const visible = markets.filter((m) => !isHidden(m));
-  if (def.marketHandle) return visible.find((m) => m.handle === def.marketHandle) ?? null;
-  return visible.find((m) => m.conditions?.regionsCondition?.regions?.nodes.some((r) => r.code === def.country)) ?? null;
-}
-
 export function shape(raw: Raw, prices: Record<string, MarketPrice | null>, note: string | null, defs: MarketDef[] = marketDefs(defaultSettings())): Data {
-  const publishedCatalogs = new Set((raw.product?.resourcePublicationsV2?.nodes ?? []).map((n) => n.publication?.catalog?.id).filter((x): x is string => !!x));
-  const rows = defs.map((def): MarketRow => {
-    const market = findMarket(def, raw.markets.nodes);
-    const catalogIds = market?.catalogs?.nodes.map((c) => c.id) ?? [];
-    const state: PublishState = !market ? "no-market" : catalogIds.some((id) => publishedCatalogs.has(id)) ? "published" : "not-published";
-    return { def, marketName: market?.name ?? null, marketStatus: market?.status ?? null, state, price: prices[def.country] ?? null };
-  });
+  const published = (raw.product?.resourcePublicationsV2?.nodes ?? []).map((n) => n.publication?.catalog?.id).filter((x): x is string => !!x);
+  const rows = marketStates(defs, raw.markets.nodes, published).map((m): MarketRow => ({ def: m.def, marketName: m.marketName, marketStatus: m.marketStatus, state: m.state, price: prices[m.def.country] ?? null }));
   return { productStatus: raw.product?.status ?? "", rows, note };
 }
 

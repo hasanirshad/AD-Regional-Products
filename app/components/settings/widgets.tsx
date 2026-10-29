@@ -1,7 +1,7 @@
 // Small pieces the Settings tabs share: a row that can move and be removed, a switch, an inline error, and a picker of
 // the store's metafield definitions (so a key can only be one that exists).
 
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type { BlockSettings, Problem } from "../../../extensions/shared/settings";
 import { onChecked } from "../../lib/dom";
 import type { Definition, ShopInfo } from "../../lib/editor/load";
@@ -9,6 +9,7 @@ import type { Market } from "../../lib/types";
 import type { Lazy } from "../../views/editor-state";
 import { Loading } from "../Loading";
 import { SelectField } from "../SelectField";
+import { TextBox } from "../editor/TextBox";
 
 export type PanelProps = {
   draft: BlockSettings;
@@ -170,3 +171,56 @@ export function MetafieldPicker({
 
 /** Says when a metafield used by the draft is not among the store's definitions (the check in the model reports it too). */
 export const nameOf = (defs: Definition[] | null, namespace: string, key: string): string | undefined => defs?.find((d) => d.namespace === namespace && d.key === key)?.name;
+
+/** A whole-number box. A text that is not a whole number is kept as typed (so the page can say what is wrong) and the value becomes NaN. */
+export function NumberBox({ label, value, onChange, details, error }: { label: string; value: number; onChange: (n: number) => void; details?: string; error?: string }) {
+  const typed = useRef(String(value));
+  const shown = Number.isInteger(value) ? String(value) : typed.current;
+  return (
+    <TextBox
+      label={label}
+      value={shown}
+      details={details}
+      error={error}
+      onChange={(v) => {
+        typed.current = v;
+        onChange(/^\d{1,3}$/.test(v.trim()) ? Number(v.trim()) : Number.NaN);
+      }}
+    />
+  );
+}
+
+/** A list of short texts: each can be removed, and one is added at a time. Case is kept as typed. */
+export function ChipList({ label, hint, items, onChange, errors, placeholder }: { label: string; hint?: string; items: string[]; onChange: (next: string[]) => void; errors?: Problem[]; placeholder?: string }) {
+  const latest = useRef("");
+  const [counter, setCounter] = useState(0);
+  const add = () => {
+    const v = latest.current.trim();
+    if (!v || items.some((x) => x.toLowerCase() === v.toLowerCase())) return;
+    onChange([...items, v]);
+    latest.current = "";
+    setCounter((n) => n + 1);
+  };
+  return (
+    <s-stack gap="small-200">
+      <s-heading>{label}</s-heading>
+      {hint ? <s-text color="subdued">{hint}</s-text> : null}
+      {items.length === 0 ? <s-text color="subdued">None.</s-text> : null}
+      <s-stack direction="inline" gap="small-200">
+        {items.map((x, i) => (
+          <s-stack key={x} direction="inline" gap="small-100" alignItems="center">
+            <s-badge tone={errors?.some((p) => p.path.endsWith(`.${i}`)) ? "critical" : "neutral"}>{x}</s-badge>
+            <s-button variant="tertiary" tone="critical" accessibilityLabel={`Remove ${x}`} onClick={() => onChange(items.filter((_, j) => j !== i))}>
+              Remove
+            </s-button>
+          </s-stack>
+        ))}
+      </s-stack>
+      {errors?.map((p) => <ErrorLine key={p.path} message={p.message} />)}
+      <s-stack direction="inline" gap="small-200" alignItems="end">
+        <TextBox key={counter} label={`Add to ${label.toLowerCase()}`} value="" placeholder={placeholder} onChange={(v) => void (latest.current = v)} />
+        <s-button onClick={add}>Add</s-button>
+      </s-stack>
+    </s-stack>
+  );
+}
