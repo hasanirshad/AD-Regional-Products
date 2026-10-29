@@ -127,7 +127,28 @@ metafield translations (text, multi-line, URL only are offered); `$app` metafiel
 - Bulk has no metafield translations.
 - Create product: variants step builds options only for a product that still has the default variant; up to 3 options
   and 100 variants.
-- Category: leaf categories only. Description is edited as raw HTML.
+- Category: leaf categories only. Description is edited in the visual editor (HTML view for the code); see "Description editor".
 - A product saved by someone else after you opened it: the recheck before writing stops the run and says which field changed.
 - The Undo record is stored in Shopify only if it is under 1.5M characters.
 - Metafield definitions: first 250 per kind are read.
+
+## Description editor (added 2026-10-29)
+
+Descriptions (source and every language) use a visual editor, not a raw HTML box: `components/editor/RichTextEditor.tsx`.
+- Toolbar: text style (paragraph, headings 1 to 4, quote), bold, italic, underline, bulleted and numbered list, link (Ctrl+K; web, mail and phone
+  addresses only, `javascript:` is refused), unlink, clear formatting, **Clean up** (removes colours, fonts, classes, ids, comments and empty paragraphs
+  from the whole text), undo, redo, and an **HTML** button to see and edit the code.
+- Where: Edit product (Basic data tab: the source and each language side by side; "Copy the source into empty languages" still works), Create product
+  (step 1) and **Bulk edit** (the Description and every "<language> · Description" column show a short preview and an **Edit** button; the editor opens in a
+  dialog, "Use this text" puts it back in the cell as a normal pending edit). In a translation dialog the main-language text can be opened above the
+  editor and copied in, when the Description column is also in the table.
+- **Opening never changes a description.** The editor shows a safe copy; nothing is sent to the review until the person types. Things that cannot be
+  edited as text (videos, iframes, forms, svg, style blocks, scripts) are shown as a locked block (style/script are hidden) and put back exactly as they
+  were when the text is read back. Event handlers (`onerror`, `onclick`) and `javascript:` links are removed from what is shown and so from what is saved
+  after an edit. `<b>` and `<i>` are saved as `<strong>` and `<em>`. Colours and styles already in the text stay unless Clean up is pressed.
+- Pasting keeps structure only (paragraphs, headings, lists, bold, italic, links); colours, fonts and classes from Word or Google Docs are left behind.
+- Code: `lib/editor/richHtml.ts` (pure: `plainText`, `previewText`, `isBlankHtml`, `normalizeUrl`; tested in node) and `lib/editor/richDom.ts`
+  (`toEditable`, `fromEditable`, `cleanPasted`, `cleanUp`; need a browser, checked in Chromium, not in the unit tests). No library; the editing uses the
+  browser's own `contenteditable` commands.
+- Checked in Chromium against the fake store (Edit product and Bulk edit, save, read-back). NOT checked: the real Polaris dialog and buttons around it,
+  Safari and Firefox, very large descriptions, screen readers. Rich text *metafields* still use the text markup (not this editor).

@@ -5,6 +5,7 @@
 // Each is planned first (nothing is written) and applied only after the person confirms and gives the password.
 
 import { adminGraphql, assertNoUserErrors } from "./admin";
+import { assertProfilesAreLive } from "./shippingMode";
 import { planMove, type MovePlan } from "./move";
 import { focusOf, matchFocus, type ProductLine, type Shipper } from "./overview";
 import { loadProfileFresh } from "./shopify-data";
@@ -194,6 +195,7 @@ const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  * Must run inside runUnlocked (the password dialog does that).
  */
 export async function runCountryFix(profileId: string, fix: CountryFix): Promise<CountryFixOutcome> {
+  await assertProfilesAreLive();
   const drift = zoneDrift(await loadProfileFresh(profileId), fix);
   if (drift) throw new Error(`${drift} Nothing was changed. Go back and review again.`);
   await applyCountryFix(profileId, fix);

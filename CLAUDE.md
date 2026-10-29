@@ -126,7 +126,7 @@ scripts/check-extensions.mjs     builds each Product Insights block (esbuild), 6
 extensions/                      Product Insights: 7 read-only admin blocks (Preact, own tsconfig). See "Product Insights blocks" below
 public/_headers                  frame-ancestors for Shopify + immutable cache for /assets/*
 ```
-553 tests in 43 files (`app/lib/**/*.test.ts` and `extensions/**/*.test.*`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
+568 tests in 46 files (`app/lib/**/*.test.ts` and `extensions/**/*.test.*`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
 which runs the real `applyMove` / `runPlan` against a fake Shopify (incl. a silent no-op). `testkit.ts` has the builders.
 No UI tests in the repo (the editor pages had a one-off Chromium smoke run, see `docs/PRODUCT-EDITOR.md`); no test for `shopify-data` queries (they only run inside the admin).
 
@@ -328,3 +328,16 @@ on one product (DE-DHL product, "Unpublish from France"), then the safety and di
 Product editor (2026-10-28): built and tested against a fake Shopify only; first real-store check is the plan in `docs/PRODUCT-EDITOR.md`.
 Hasan still has to: confirm Cloudflare is green on the latest push, run `npm run deploy` (scopes changed: `write_translations`, `read_locales`),
 and install the app on the right store with the custom distribution link.
+
+## Platform watch (2026-10-29)
+
+Per-market shipping and returns, the Fall '26 audit and the remaining list are in `docs/PLATFORM-WATCH.md`.
+Rule added: `applyMove` and `runCountryFix` call `assertProfilesAreLive()` first and write nothing when `shop.features.marketDrivenShipping` is true
+(Shopify silently ignores merchant delivery-profile writes there). Market availability block: read-only Shipping and Returns columns, each a separate soft
+query; Returns needs scope `read_legal_policies` (deploy + approve). 568 tests in 46 files.
+
+## Description editor (2026-10-29)
+
+Descriptions (Edit product, Create product, Bulk edit, all languages) are edited in `components/editor/RichTextEditor.tsx` (toolbar + HTML view).
+Bulk cells show a preview and an Edit button that opens the editor in a dialog. Opening never changes the stored HTML; unsupported content (iframes, style,
+script) is kept as it was. Details: `docs/PRODUCT-EDITOR.md` ("Description editor"). DOM code (`richDom.ts`) is tested in Chromium only; `richHtml.ts` has unit tests.

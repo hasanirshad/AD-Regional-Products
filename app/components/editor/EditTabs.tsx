@@ -15,6 +15,7 @@ import type { EditState } from "../../views/edit-state";
 import { Loading } from "../Loading";
 import { SelectField } from "../SelectField";
 import { FieldBlock, type LangCell } from "./FieldBlock";
+import { RichTextEditor } from "./RichTextEditor";
 import { TextBox } from "./TextBox";
 
 export type TabProps = {
@@ -31,7 +32,7 @@ const productTarget = (productId: string, field: ProductField): Target => ({ kin
 const variantTarget = (productId: string, variantId: string, field: VariantField): Target => ({ kind: "variant", productId, variantId, field });
 
 /** A product field with its translations in every store language. */
-function TranslatableField({ edit, shared, doc, field, multiline, rows, hint, label }: TabProps & { field: ProductField; multiline?: boolean; rows?: number; hint?: string; label?: string }) {
+function TranslatableField({ edit, shared, doc, field, multiline, rows, hint, label, rich }: TabProps & { field: ProductField; multiline?: boolean; rows?: number; hint?: string; label?: string; rich?: boolean }) {
   const key = PRODUCT_TRANSLATION_KEY[field];
   const target = productTarget(doc.id, field);
   const source = edit.effectiveValue(target) ?? "";
@@ -68,9 +69,16 @@ function TranslatableField({ edit, shared, doc, field, multiline, rows, hint, la
       sourceText={source}
       multiline={multiline}
       rows={rows}
+      rich={rich}
       changed={targetKey(target) in edit.edits}
       cells={cells}
-      source={<TextBox label={name} hideLabel value={source} multiline={multiline} rows={rows} onChange={(text) => edit.put(target, text)} />}
+      source={
+        rich ? (
+          <RichTextEditor label={name} value={source} onChange={(text) => edit.put(target, text)} />
+        ) : (
+          <TextBox label={name} hideLabel value={source} multiline={multiline} rows={rows} onChange={(text) => edit.put(target, text)} />
+        )
+      }
     />
   );
 }
@@ -81,7 +89,7 @@ export function BasicTab(props: TabProps) {
   return (
     <s-stack gap="base">
       <TranslatableField {...props} field="title" />
-      <TranslatableField {...props} field="descriptionHtml" label="Description" multiline rows={8} hint="This is the HTML Shopify stores. Keep the tags, change the words." />
+      <TranslatableField {...props} field="descriptionHtml" label="Description" rich hint="Format the text with the toolbar. Use HTML to see or edit the code. Copy the source into a language, then translate it in place." />
       <s-section heading="Vendor and status">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 16 }}>
           <TextBox label="Vendor" value={edit.effectiveValue(productTarget(doc.id, "vendor")) ?? ""} onChange={(text) => edit.put(productTarget(doc.id, "vendor"), text)} />

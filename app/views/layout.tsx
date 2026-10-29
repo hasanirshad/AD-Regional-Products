@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { BlockSettings } from "../../extensions/shared/settings";
 import { Outlet } from "react-router";
 import { Gate } from "../components/Gate";
@@ -7,6 +7,7 @@ import { useBulkState } from "./bulk-state";
 import { useEditState } from "./edit-state";
 import { useEditorShared } from "./editor-state";
 import { useProductsLoad, useProductsUi, type Shared } from "./products-state";
+import { MARKET_DRIVEN_MESSAGE, readShippingMode } from "../lib/shippingMode";
 import { useLoadAppState } from "./state";
 
 // Layout: navigation, shared state, loading and error shell.
@@ -22,6 +23,16 @@ export default function Layout() {
   const inventoryUi = useProductsUi();
   const [invFilters, setInvFilters] = useState<InvFilters>(NO_INV_FILTERS);
   const [blockDraft, setBlockDraft] = useState<BlockSettings | null>(null);
+  const [marketDriven, setMarketDriven] = useState(false);
+  const ready = loaded.status === "ready";
+  useEffect(() => {
+    if (!ready) return;
+    let live = true;
+    void readShippingMode().then((mode) => live && setMarketDriven(mode === "market-driven"));
+    return () => {
+      live = false;
+    };
+  }, [ready]);
   const marketIds = useMemo(() => (app ? app.markets.map((m) => m.id) : null), [app]);
   const editor = useEditorShared(marketIds);
   const edit = useEditState(editor);
@@ -50,6 +61,7 @@ export default function Layout() {
         error={loaded.status === "error" ? loaded.message : undefined}
         onRetry={reload}
       >
+        {marketDriven ? <s-banner tone="critical" heading="Shipping profiles are read-only here">{MARKET_DRIVEN_MESSAGE}</s-banner> : null}
         {shared ? <Outlet context={shared} /> : null}
       </Gate>
     </>

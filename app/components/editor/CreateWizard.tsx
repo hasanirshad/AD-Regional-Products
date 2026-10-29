@@ -14,6 +14,7 @@ import type { EditorShared } from "../../views/editor-state";
 import { RunFlow } from "../RunFlow";
 import { MetafieldsTab } from "./MetafieldsTab";
 import { TextBox } from "./TextBox";
+import { RichTextEditor } from "./RichTextEditor";
 
 export function StepStrip({ current, onJump }: { current: CreateStep; onJump: (s: CreateStep) => void }) {
   const at = CREATE_STEPS.findIndex((s) => s.id === current);
@@ -80,7 +81,7 @@ export function CreateStart({ edit, onCreated, onCancel }: { edit: EditState; sh
         <s-text color="subdued">Start with the basics. Everything else comes in the next steps, and you can stop at any step and continue later.</s-text>
         <TextBox label="Title" value={product.title} onChange={(title) => setProduct((p) => ({ ...p, title }))} />
         <TextBox label="Vendor" value={product.vendor} onChange={(vendor) => setProduct((p) => ({ ...p, vendor }))} />
-        <TextBox label="Description (HTML)" value={product.descriptionHtml} multiline rows={6} onChange={(descriptionHtml) => setProduct((p) => ({ ...p, descriptionHtml }))} />
+        <RichTextEditor label="Description" value={product.descriptionHtml} onChange={(descriptionHtml) => setProduct((p) => ({ ...p, descriptionHtml }))} />
         {product.title !== "" && problem ? <s-text tone="critical">{problem}</s-text> : null}
         <s-stack direction="inline" gap="small-200">
           <s-button onClick={onCancel}>Cancel</s-button>

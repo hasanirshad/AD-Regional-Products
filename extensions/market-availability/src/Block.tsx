@@ -10,6 +10,8 @@ const STATE: Record<MarketRow["state"], { tone: Tone; text: string }> = {
 export function View({ data }: { data: Data }) {
   const missing = data.rows.filter((r) => r.state !== "published");
   const notLive = data.productStatus && data.productStatus !== "ACTIVE";
+  const showShipping = data.rows.some((r) => r.shipping != null);
+  const showReturns = data.rows.some((r) => r.returns != null);
   return (
     <s-stack direction="block" gap="base">
       {notLive ? (
@@ -25,7 +27,7 @@ export function View({ data }: { data: Data }) {
         </Note>
       ) : null}
       <Table
-        headers={["Market", "Status", "Price", "Compare-at"]}
+        headers={["Market", "Status", "Price", "Compare-at", ...(showShipping ? ["Shipping"] : []), ...(showReturns ? ["Returns"] : [])]}
         rows={data.rows.map((r) => {
           const s = STATE[r.state];
           return {
@@ -38,11 +40,14 @@ export function View({ data }: { data: Data }) {
               </s-stack>,
               r.price ? formatRange(r.price.low.price, r.price.high.price) : <Muted>No price</Muted>,
               r.price && (r.price.low.compareAt || r.price.high.compareAt) ? formatRange(r.price.low.compareAt, r.price.high.compareAt) : <Muted>—</Muted>,
+              ...(showShipping ? [r.shipping ?? <Muted>—</Muted>] : []),
+              ...(showReturns ? [r.returns ?? <Muted>—</Muted>] : []),
             ],
           };
         })}
       />
       {data.note ? <Muted>{data.note}</Muted> : null}
+      {data.extrasNote ? <Muted>{data.extrasNote}</Muted> : null}
     </s-stack>
   );
 }

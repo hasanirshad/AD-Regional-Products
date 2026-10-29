@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { STATUS_TONE, STATUS_WORDS, type TranslationStatus } from "../../lib/editor/canon";
 import type { Slot } from "../../lib/editor/locales";
+import { RichTextEditor } from "./RichTextEditor";
 import { TextBox } from "./TextBox";
 
 export type LangCell = {
@@ -30,6 +31,7 @@ export function FieldBlock({
   cells,
   multiline,
   rows,
+  rich,
   changed,
 }: {
   label: string;
@@ -42,6 +44,8 @@ export function FieldBlock({
   cells: LangCell[];
   multiline?: boolean;
   rows?: number;
+  /** The text is HTML: show the visual editor instead of a plain box. */
+  rich?: boolean;
   /** The source value was edited and not saved. */
   changed?: boolean;
 }) {
@@ -72,17 +76,24 @@ export function FieldBlock({
                   <s-badge tone={STATUS_TONE[c.status]}>{STATUS_WORDS[c.status]}</s-badge>
                   {c.changed ? <s-badge tone="info">Edited</s-badge> : null}
                 </s-stack>
-                <TextBox
-                  label={`${label} in ${c.slot.label}`}
-                  hideLabel
-                  value={c.value}
-                  onChange={c.onChange}
-                  multiline={multiline}
-                  rows={rows}
-                  disabled={!c.editable}
-                  placeholder={c.editable ? "Type or paste the translation" : undefined}
-                  details={c.note}
-                />
+                {rich ? (
+                  <>
+                    <RichTextEditor label={`${label} in ${c.slot.label}`} value={c.value} onChange={c.onChange} disabled={!c.editable} minHeight={140} placeholder={c.editable ? "Type or paste the translation" : undefined} />
+                    {c.note ? <s-text color="subdued">{c.note}</s-text> : null}
+                  </>
+                ) : (
+                  <TextBox
+                    label={`${label} in ${c.slot.label}`}
+                    hideLabel
+                    value={c.value}
+                    onChange={c.onChange}
+                    multiline={multiline}
+                    rows={rows}
+                    disabled={!c.editable}
+                    placeholder={c.editable ? "Type or paste the translation" : undefined}
+                    details={c.note}
+                  />
+                )}
               </s-stack>
             </div>
           ))}

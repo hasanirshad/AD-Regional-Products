@@ -4,6 +4,7 @@
 
 import { adminGraphql, assertNoUserErrors } from "./admin";
 import type { MovePlan } from "./move";
+import { assertProfilesAreLive } from "./shippingMode";
 
 export type Failure = { productId: string; title: string; message: string };
 
@@ -84,6 +85,8 @@ export async function applyMove(
 
   // ---- 1. Shipping profile --------------------------------------------
   const moving = plan.lines.filter((l) => l.shippingChange);
+  // Shipping profiles are not live on a market-driven shop: stop before anything is written.
+  if (moving.length > 0) await assertProfilesAreLive();
   let done = 0;
   options.onProgress({ phase: "shipping", done, total: moving.length });
 
