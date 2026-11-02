@@ -16,6 +16,8 @@ export function ChangesBar({
   onGoTo,
   reviewLabel = "Review changes",
   primary = true,
+  summary,
+  goLabel,
 }: {
   edits: EditMap;
   built: BuiltChanges;
@@ -26,6 +28,10 @@ export function ChangesBar({
   reviewLabel?: string;
   /** False when another button on the page is the main one. */
   primary?: boolean;
+  /** Replaces the "Basic 2 · Prices 1" part of the line (Product Edits counts by step instead of by tab). */
+  summary?: string;
+  /** The label of the button that goes to a field with a problem. */
+  goLabel?: (issue: Issue) => string;
 }) {
   const [asking, setAsking] = useState(false);
   const total = Object.keys(edits).length;
@@ -45,7 +51,7 @@ export function ChangesBar({
             ) : (
               <>
                 <s-badge tone="info">{`${total} unsaved`}</s-badge>
-                <s-text color="subdued">{`${productCount} product${productCount === 1 ? "" : "s"} · ${tabs.map((t) => `${tabLabel(t)} ${byTab[t]}`).join(" · ")}`}</s-text>
+                <s-text color="subdued">{`${productCount} product${productCount === 1 ? "" : "s"} · ${summary ?? tabs.map((t) => `${tabLabel(t)} ${byTab[t]}`).join(" · ")}`}</s-text>
               </>
             )}
           </s-stack>
@@ -83,7 +89,7 @@ export function ChangesBar({
                 <s-text tone="critical">{b.message}</s-text>
                 {onGoTo && b.id && edits[b.id] ? (
                   <s-button variant="tertiary" onClick={() => onGoTo(b)}>
-                    {`Go to ${tabLabel(tabOf(edits[b.id]!.target))}`}
+                    {goLabel ? goLabel(b) : `Go to ${tabLabel(tabOf(edits[b.id]!.target))}`}
                   </s-button>
                 ) : null}
               </s-stack>

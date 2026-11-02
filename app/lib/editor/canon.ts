@@ -96,6 +96,8 @@ export function sameFor(target: Target, a: Value | undefined, b: Value | undefin
     }
     case "stock":
       return parseNumber(a) === parseNumber(b);
+    case "publish":
+      return (a === "true") === (b === "true");
     case "translation":
       return normText(a) === normText(b);
   }
@@ -146,7 +148,9 @@ export function showValue(target: Target, v: Value | undefined): string {
     case "metafield":
       return v === null || v === undefined ? empty : formatValue(target.type, v);
     case "stock":
-      return v === null || v === undefined || v === "" ? empty : v;
+      return v === null || v === undefined || v === "" ? "Not stocked here" : v;
+    case "publish":
+      return v === "true" ? "Published" : "Not published";
     case "translation":
       return normText(v) === "" ? empty : (v as string);
   }

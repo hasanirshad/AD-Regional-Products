@@ -43,7 +43,7 @@ export function removeEdits(edits: EditMap, keys: string[]): EditMap {
 export const editCount = (edits: EditMap): number => Object.keys(edits).length;
 
 export function countByTab(edits: EditMap): Record<TabId, number> {
-  const out: Record<TabId, number> = { basic: 0, seo: 0, productMeta: 0, variantMeta: 0, type: 0, inventory: 0, tags: 0, prices: 0 };
+  const out: Record<TabId, number> = { basic: 0, seo: 0, productMeta: 0, variantMeta: 0, type: 0, inventory: 0, tags: 0, prices: 0, publishing: 0 };
   for (const e of Object.values(edits)) out[tabOf(e.target)]++;
   return out;
 }

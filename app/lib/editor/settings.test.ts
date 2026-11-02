@@ -40,8 +40,10 @@ describe("bookmarks", () => {
 
 describe("draft state", () => {
   it("accepts a known step and rejects an unknown one", () => {
-    const raw = serializeDraftState({ step: "tags", product: ["custom.a"], variant: [], savedAt: "t" });
-    expect(parseDraftState(raw)).toEqual({ step: "tags", product: ["custom.a"], variant: [], savedAt: "t" });
+    // An old step name is mapped to the closest new step.
+    const raw = JSON.stringify({ version: 1, step: "tags", product: ["custom.a"], variant: [], savedAt: "t" });
+    expect(parseDraftState(raw)).toEqual({ step: "info", product: ["custom.a"], variant: [], savedAt: "t" });
+    expect(parseDraftState(JSON.stringify({ step: "variantOptions", product: [], variant: [] }))).toMatchObject({ step: "variantOptions" });
     expect(parseDraftState(JSON.stringify({ step: "nope" }))).toBeNull();
     expect(parseDraftState("{")).toBeNull();
   });

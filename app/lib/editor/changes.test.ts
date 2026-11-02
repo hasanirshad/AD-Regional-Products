@@ -169,3 +169,30 @@ describe("undo and row patches", () => {
     expect(out).toEqual({ [P]: { title: "Oak", tags: ["a", "b"] } });
   });
 });
+
+describe("stock removal, publishing and the PDP template", () => {
+  const pub: Target = { kind: "publish", productId: P, publicationId: "pub1" };
+  const tpl: Target = { kind: "product", productId: P, field: "templateSuffix" };
+
+  it("warns when taking a variant out of a location that holds units", () => {
+    const edits = put({}, stock, null);
+    const built = buildChanges(edits, make(edits));
+    expect(built.errors).toEqual([]);
+    expect(built.warnings.map((w) => w.message).join(" ")).toMatch(/5 units/);
+    expect(built.changes[0]!.after).toBeNull();
+  });
+
+  it("shows a stocked-then-not-stocked location and publish values in plain words", () => {
+    const edits = put(put({}, pub, "true"), tpl, "made-to-order");
+    const ctx = { ...make(edits), publicationName: (id: string) => (id === "pub1" ? "Online Store" : undefined) };
+    const built = buildChanges(edits, ctx);
+    expect(built.changes.map((c) => c.label).sort()).toEqual(["PDP template", "Published · Online Store"]);
+    expect(built.changes.find((c) => c.tab === "publishing")).toBeTruthy();
+    expect(built.changes.find((c) => c.target.kind === "product")!.tab).toBe("basic");
+  });
+
+  it("rejects a publish value that is not true or false", () => {
+    const edits = putEdit({}, pub, "maybe", "true");
+    expect(buildChanges(edits, make(edits)).errors).toHaveLength(1);
+  });
+});

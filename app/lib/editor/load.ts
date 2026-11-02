@@ -3,6 +3,7 @@
 
 
 import { mfKey, noteCategory, type MetafieldDoc, type ProductDoc, type StockLevelDoc, type TranslationRes, type VariantDoc } from "./doc";
+import { loadPickLabels } from "./refs";
 import { chunks, gqlString, type Gql } from "./gql";
 import { parseSlot, type ShopLocale } from "./locales";
 import type { OwnerKind } from "./mfTypes";
@@ -23,7 +24,10 @@ export const PRODUCT_QUERY = `#graphql
       tags
       seo { title description }
       category { id name }
-      options { name optionValues { name } }
+      templateSuffix
+      onlineStorePreviewUrl
+      options { id name position optionValues { id name } }
+      resourcePublicationsV2(first: 50) { nodes { publication { id } } }
       variantsCount { count }
       metafields(first: 100) {
         pageInfo { hasNextPage endCursor }
@@ -66,6 +70,7 @@ export const VARIANTS_QUERY = `#graphql
             sku
             inventoryLevels(first: 10) {
               nodes {
+                id
                 location { id }
                 quantities(names: ["available"]) { name quantity }
               }
@@ -89,7 +94,10 @@ type RawProduct = {
   tags: string[];
   seo: { title: string | null; description: string | null } | null;
   category: { id: string; name: string } | null;
-  options: { name: string; optionValues: { name: string }[] }[];
+  templateSuffix?: string | null;
+  onlineStorePreviewUrl?: string | null;
+  options: { id?: string; name: string; position?: number; optionValues: { id?: string; name: string }[] }[];
+  resourcePublicationsV2?: { nodes: { publication?: { id: string } | null }[] } | null;
   variantsCount: { count: number } | null;
   metafields: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: RawMetafield[] };
 };
@@ -107,7 +115,7 @@ type RawVariant = {
     id: string;
     tracked: boolean;
     sku: string | null;
-    inventoryLevels: { nodes: { location: { id: string }; quantities: { name: string; quantity: number }[] }[] };
+    inventoryLevels: { nodes: { id?: string; location: { id: string }; quantities: { name: string; quantity: number }[] }[] };
   } | null;
 };
 
@@ -120,6 +128,7 @@ export function parseVariant(v: RawVariant): VariantDoc {
   const levels: StockLevelDoc[] = (v.inventoryItem?.inventoryLevels.nodes ?? []).map((l) => ({
     locationId: l.location.id,
     quantity: l.quantities.find((q) => q.name === "available")?.quantity ?? 0,
+    ...(l.id ? { id: l.id } : {}),
   }));
   return {
     id: v.id,
@@ -156,7 +165,10 @@ export function parseProduct(p: RawProduct, variants: VariantDoc[], variantsTrun
     productType: p.productType ?? "",
     category: p.category ? { id: p.category.id, name: p.category.name } : null,
     tags: p.tags,
-    options: p.options.map((o) => ({ name: o.name, values: o.optionValues.map((x) => x.name) })),
+    options: p.options.map((o, i) => ({ id: o.id ?? "", name: o.name, position: o.position ?? i + 1, values: o.optionValues.map((x) => x.name), valueIds: o.optionValues.map((x) => x.id ?? "") })),
+    templateSuffix: p.templateSuffix ?? "",
+    previewUrl: p.onlineStorePreviewUrl ?? null,
+    publicationIds: (p.resourcePublicationsV2?.nodes ?? []).flatMap((n) => (n.publication?.id ? [n.publication.id] : [])),
     variants,
     variantsTruncated,
     variantCount: p.variantsCount?.count ?? variants.length,
@@ -328,6 +340,13 @@ export async function loadRefLabels(gql: Gql, ids: string[]): Promise<Record<str
     for (const n of data.nodes) if (n?.id) out[n.id] = n.title ?? n.displayName ?? n.id;
   }
   return out;
+}
+
+/** Names for every kind of reference: products, collections and variants, and also metaobject entries and files. */
+export async function loadAllRefLabels(gql: Gql, ids: string[]): Promise<Record<string, string>> {
+  const basic = ids.filter((id) => /\/(Product|Collection|ProductVariant)\//.test(id));
+  const [a, b] = await Promise.all([loadRefLabels(gql, basic), loadPickLabels(gql, ids)]);
+  return { ...a, ...b };
 }
 
 // ---------------------------------------------------------------- translations

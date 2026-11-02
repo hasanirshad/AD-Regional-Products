@@ -5,10 +5,13 @@
 //   2. the URL handle           (productUpdate, on its own, with an optional redirect)
 //   3. variants                 (productVariantsBulkUpdate: price, compare-at, SKU, barcode, tracking, selling rule)
 //   4. metafields               (metafieldsSet / metafieldsDelete)
-//   5. stock                    (inventorySetQuantities, after tracking is on)
-//   6. translations             (translationsRegister / translationsRemove, with digests read AFTER the source text is saved)
+//   5. stock                    (inventoryActivate for a new location, inventorySetQuantities, inventoryDeactivate for a removed one)
+//   6. publishing               (publishablePublish / publishableUnpublish)
+//   7. translations             (translationsRegister / translationsRemove, with digests read AFTER the source text is saved;
+//                                a translation of a metafield that had no value yet finds its id now)
 
 import { formatUserErrors, chunks, messageOf, type Gql, type UserError } from "./gql";
+import { resolveDeferred, resolvedId } from "./deferred";
 import { loadDigests } from "./load";
 import { parseSlot } from "./locales";
 import { normText, parseNumber, tagsFromValue } from "./canon";
@@ -65,6 +68,35 @@ export const STOCK_SET = `#graphql
     }
   }`;
 
+export const STOCK_ACTIVATE = `#graphql
+  mutation EditorStockActivate($itemId: ID!, $locationId: ID!) {
+    inventoryActivate(inventoryItemId: $itemId, locationId: $locationId) {
+      inventoryLevel { id }
+      userErrors { field message }
+    }
+  }`;
+
+export const STOCK_DEACTIVATE = `#graphql
+  mutation EditorStockDeactivate($id: ID!) {
+    inventoryDeactivate(inventoryLevelId: $id) {
+      userErrors { message }
+    }
+  }`;
+
+export const PUBLISH = `#graphql
+  mutation EditorPublish($id: ID!, $input: [PublicationInput!]!) {
+    publishablePublish(id: $id, input: $input) {
+      userErrors { field message }
+    }
+  }`;
+
+export const UNPUBLISH = `#graphql
+  mutation EditorUnpublish($id: ID!, $input: [PublicationInput!]!) {
+    publishableUnpublish(id: $id, input: $input) {
+      userErrors { field message }
+    }
+  }`;
+
 export const TRANSLATIONS_REGISTER = `#graphql
   mutation EditorTranslationsRegister($resourceId: ID!, $translations: [TranslationInput!]!) {
     translationsRegister(resourceId: $resourceId, translations: $translations) {
@@ -88,6 +120,7 @@ type VariantChange = Change & { target: Extract<Target, { kind: "variant" }> };
 type MetafieldChange = Change & { target: Extract<Target, { kind: "metafield" }> };
 type StockChange = Change & { target: Extract<Target, { kind: "stock" }> };
 type TranslationChange = Change & { target: Extract<Target, { kind: "translation" }> };
+type PublishChange = Change & { target: Extract<Target, { kind: "publish" }> };
 
 export function splitChanges(changes: Change[]) {
   return {
@@ -96,6 +129,7 @@ export function splitChanges(changes: Change[]) {
     variant: changes.filter((c): c is VariantChange => c.target.kind === "variant"),
     metafield: changes.filter((c): c is MetafieldChange => c.target.kind === "metafield"),
     stock: changes.filter((c): c is StockChange => c.target.kind === "stock"),
+    publish: changes.filter((c): c is PublishChange => c.target.kind === "publish"),
     translation: changes.filter((c): c is TranslationChange => c.target.kind === "translation"),
   };
 }
@@ -129,6 +163,10 @@ export function productInput(productId: string, changes: ProductChange[]): Recor
         break;
       case "tags":
         input.tags = tagsFromValue(after);
+        break;
+      case "templateSuffix":
+        // Empty = the default template.
+        input.templateSuffix = text(after).trim() === "" ? null : text(after).trim();
         break;
       case "seoTitle":
         seo.title = text(after).trim();
@@ -251,35 +289,91 @@ async function metafieldStep(gql: Gql, changes: MetafieldChange[]): Promise<PerC
   return out;
 }
 
+const STOCK_LEVELS_READ = `#graphql
+  query EditorStockLevels($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on ProductVariant {
+        id
+        inventoryItem { inventoryLevels(first: 20) { nodes { id location { id } } } }
+      }
+    }
+  }`;
+
+/**
+ * Stock changes of one product, in a safe order: places a variant is NEWLY stocked at first, then quantities, and only
+ * then the places it is taken out of, so a variant is never left with no location in between.
+ *   before null, after a number  -> stock it there (inventoryActivate), then set the quantity
+ *   before a number, after a number -> set the quantity
+ *   before a number, after null  -> take it out of the location (inventoryDeactivate)
+ */
 async function stockStep(gql: Gql, changes: StockChange[]): Promise<PerChange> {
   const out: PerChange = new Map();
-  const usable = changes.filter((c) => {
-    if (c.before === null) {
-      out.set(c.id, "The variant is not stocked at this location. Stock it there in Shopify first.");
-      return false;
-    }
-    return true;
-  });
-  const quantity = (c: StockChange) => ({
-    inventoryItemId: c.target.itemId,
-    locationId: c.target.locationId,
-    quantity: parseNumber(c.after) ?? 0,
-    changeFromQuantity: parseNumber(c.before),
-  });
-  for (const group of chunks(usable, 100)) {
+  const activate = changes.filter((c) => c.before === null && c.after !== null);
+  const update = changes.filter((c) => c.before !== null && c.after !== null);
+  const remove = changes.filter((c) => c.after === null && c.before !== null);
+  for (const c of changes) if (c.before === null && c.after === null) out.set(c.id, null);
+
+  const setQuantity = async (c: StockChange, from: number | null): Promise<string | null> => {
     const data = await gql<{ inventorySetQuantities: { userErrors: UserError[] } }>(STOCK_SET, {
-      input: { name: "available", reason: "correction", quantities: group.map(quantity) },
+      input: { name: "available", reason: "correction", quantities: [{ inventoryItemId: c.target.itemId, locationId: c.target.locationId, quantity: parseNumber(c.after) ?? 0, changeFromQuantity: from }] },
     });
+    return formatUserErrors(data.inventorySetQuantities.userErrors) || null;
+  };
+
+  // 1. newly stocked locations
+  for (const c of activate) {
+    try {
+      const data = await gql<{ inventoryActivate: { userErrors: UserError[] } }>(STOCK_ACTIVATE, { itemId: c.target.itemId, locationId: c.target.locationId });
+      const message = formatUserErrors(data.inventoryActivate.userErrors);
+      if (message) {
+        out.set(c.id, message);
+        continue;
+      }
+      // A new level starts at 0, so only a quantity above 0 needs setting.
+      out.set(c.id, (parseNumber(c.after) ?? 0) > 0 ? await setQuantity(c, 0) : null);
+    } catch (e) {
+      out.set(c.id, messageOf(e));
+    }
+  }
+
+  // 2. quantities of locations the variant already had
+  for (const group of chunks(update, 100)) {
+    const quantity = (c: StockChange) => ({ inventoryItemId: c.target.itemId, locationId: c.target.locationId, quantity: parseNumber(c.after) ?? 0, changeFromQuantity: parseNumber(c.before) });
+    const data = await gql<{ inventorySetQuantities: { userErrors: UserError[] } }>(STOCK_SET, { input: { name: "available", reason: "correction", quantities: group.map(quantity) } });
     if (!formatUserErrors(data.inventorySetQuantities.userErrors)) {
       for (const [id, m] of okAll(group)) out.set(id, m);
       continue;
     }
     for (const c of group) {
       try {
-        const one = await gql<{ inventorySetQuantities: { userErrors: UserError[] } }>(STOCK_SET, {
-          input: { name: "available", reason: "correction", quantities: [quantity(c)] },
-        });
-        out.set(c.id, formatUserErrors(one.inventorySetQuantities.userErrors) || null);
+        out.set(c.id, await setQuantity(c, parseNumber(c.before)));
+      } catch (e) {
+        out.set(c.id, messageOf(e));
+      }
+    }
+  }
+
+  // 3. locations the variant is taken out of (the level id is read now)
+  if (remove.length > 0) {
+    const levelIds = new Map<string, string>();
+    try {
+      for (const group of chunks([...new Set(remove.map((c) => c.target.variantId))], 25)) {
+        const data = await gql<{ nodes: ({ id?: string; inventoryItem?: { inventoryLevels: { nodes: { id: string; location: { id: string } }[] } } | null } | null)[] }>(STOCK_LEVELS_READ, { ids: group });
+        for (const n of data.nodes) for (const l of n?.inventoryItem?.inventoryLevels.nodes ?? []) if (n?.id) levelIds.set(`${n.id}|${l.location.id}`, l.id);
+      }
+    } catch (e) {
+      for (const c of remove) out.set(c.id, messageOf(e));
+    }
+    for (const c of remove) {
+      if (out.has(c.id)) continue;
+      const id = levelIds.get(`${c.target.variantId}|${c.target.locationId}`);
+      if (!id) {
+        out.set(c.id, null); // already gone
+        continue;
+      }
+      try {
+        const data = await gql<{ inventoryDeactivate: { userErrors: UserError[] } }>(STOCK_DEACTIVATE, { id });
+        out.set(c.id, formatUserErrors(data.inventoryDeactivate.userErrors) || null);
       } catch (e) {
         out.set(c.id, messageOf(e));
       }
@@ -288,10 +382,45 @@ async function stockStep(gql: Gql, changes: StockChange[]): Promise<PerChange> {
   return out;
 }
 
+async function publishStep(gql: Gql, productId: string, changes: PublishChange[]): Promise<PerChange> {
+  const out: PerChange = new Map();
+  const on = changes.filter((c) => c.after === "true");
+  const off = changes.filter((c) => c.after !== "true");
+  const run = async (list: PublishChange[], mutation: string, key: "publishablePublish" | "publishableUnpublish") => {
+    if (list.length === 0) return;
+    try {
+      const data = await gql<Record<string, { userErrors: UserError[] }>>(mutation, { id: productId, input: list.map((c) => ({ publicationId: c.target.publicationId })) });
+      const message = formatUserErrors(data[key]!.userErrors);
+      for (const [id, m] of message ? failAll(list, message) : okAll(list)) out.set(id, m);
+    } catch (e) {
+      for (const c of list) out.set(c.id, messageOf(e));
+    }
+  };
+  await run(on, PUBLISH, "publishablePublish");
+  await run(off, UNPUBLISH, "publishableUnpublish");
+  return out;
+}
+
 const NO_SOURCE = "Shopify has no source text for this field, so it cannot be translated yet. Add the text in the main language and save it first.";
 
-async function translationStep(gql: Gql, changes: TranslationChange[]): Promise<PerChange> {
+const NO_METAFIELD = "This metafield has no value yet, so there is nothing to translate. Add the value in the main language.";
+
+async function translationStep(gql: Gql, original: TranslationChange[]): Promise<PerChange> {
   const out: PerChange = new Map();
+  if (original.length === 0) return out;
+
+  // A translation typed before its metafield had a value: the value is saved by now, so its id can be looked up.
+  const lookup = await resolveDeferred(gql, original.flatMap((c) => (c.target.defer ? [c.target.defer] : [])));
+  const changes: TranslationChange[] = [];
+  for (const c of original) {
+    if (!c.target.defer) {
+      changes.push(c);
+      continue;
+    }
+    const id = resolvedId(lookup, c.target.defer);
+    if (!id) out.set(c.id, NO_METAFIELD);
+    else changes.push({ ...c, target: { ...c.target, resourceId: id } });
+  }
   if (changes.length === 0) return out;
   const adds = changes.filter((c) => normText(c.after) !== "");
   const removes = changes.filter((c) => normText(c.after) === "");
@@ -386,6 +515,7 @@ export async function applyBundle(gql: Gql, bundle: Bundle, options: ApplyOption
     { name: "Variants", changes: split.variant, run: () => variantStep(gql, bundle.productId, split.variant) },
     { name: "Metafields", changes: split.metafield, run: () => metafieldStep(gql, split.metafield) },
     { name: "Stock", changes: split.stock, run: () => stockStep(gql, split.stock) },
+    { name: "Publishing", changes: split.publish, run: () => publishStep(gql, bundle.productId, split.publish) },
     { name: "Translations", changes: split.translation, run: () => translationStep(gql, split.translation) },
   ];
 

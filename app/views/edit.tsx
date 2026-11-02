@@ -1,39 +1,42 @@
 import { useMemo, useState } from "react";
-import { BasicTab, InventoryTab, PricesTab, SeoTab, TagsTab, TypeTab, type TabProps } from "../components/editor/EditTabs";
 import { ChangesBar } from "../components/editor/ChangesBar";
-import { CreateStart, StepStrip, VariantsStep } from "../components/editor/CreateWizard";
-import { MetafieldsTab } from "../components/editor/MetafieldsTab";
+import type { TabProps } from "../components/editor/EditTabs";
 import { ProductPicker } from "../components/editor/ProductPicker";
 import { ReviewScreen } from "../components/editor/ReviewScreen";
+import { CreateStart } from "../components/editor/steps/CreateStart";
+import { CuratedStep, type CuratedStepId } from "../components/editor/steps/CuratedStep";
+import { InfoStep } from "../components/editor/steps/InfoStep";
+import { InventoryStep } from "../components/editor/steps/InventoryStep";
+import { PublishingStep } from "../components/editor/steps/PublishingStep";
+import { ReviewStep } from "../components/editor/steps/ReviewStep";
+import { SeoStep } from "../components/editor/steps/SeoStep";
+import { StepFooter } from "../components/editor/steps/StepFooter";
+import { StepStrip } from "../components/editor/steps/StepStrip";
+import { VariantsStep, optionsStatus } from "../components/editor/steps/VariantsStep";
 import { UndoBar } from "../components/editor/UndoBar";
 import { Loading } from "../components/Loading";
 import { PageBody } from "../components/PageBody";
-import { useGuard } from "../components/PasswordGate";
-import { clearDraftState, nextStep } from "../lib/editor/create";
-import { countByTab, editsOfProduct } from "../lib/editor/edits";
-import { liveGql, messageOf } from "../lib/editor/gql";
-import { gidNumber, STATUS_LABEL, TABS, tabOf, type Issue, type TabId } from "../lib/editor/model";
-import type { RunSummary } from "../lib/editor/run";
-import { CREATE_STEPS, listDrafts, saveDraftState, type CreateStep, type UnfinishedDraft } from "../lib/editor/settings";
+import { liveGql } from "../lib/editor/gql";
+import { gidNumber, STATUS_LABEL } from "../lib/editor/model";
+import { normalizeStep, stepAfter, stepInfo, type StepId } from "../lib/editor/productSteps";
+import { saveDraftState } from "../lib/editor/settings";
 import { useStartEditor } from "./editor-state";
 import { useAppState } from "./state";
 
 const tone = (status: string) => (status === "ACTIVE" ? "success" : status === "DRAFT" ? "warning" : "neutral");
 
-// Edit product: pick a product, edit it in tabs (every field next to its translations), see all the changes in one bar,
-// review them once, confirm once, enter the password once. Reading is free; nothing is written before the review.
-export default function EditProduct() {
+/**
+ * Product Edits: make a draft product or edit an existing one, in the same steps. The strip at the top opens any step at
+ * any time. "Save and next" shows a review of what changed, asks for the password, saves, and moves on. The product is
+ * always saved as it is (a new one as a draft); this page never makes a product active.
+ */
+export default function ProductEdits() {
   const { edit, editor: shared, products } = useAppState();
   useStartEditor(shared, ["info", "productDefs", "variantDefs", "settings"]);
-  const guard = useGuard();
-  const [finishing, setFinishing] = useState(false);
-  const [starting, setStarting] = useState(false);
-  const [notice, setNotice] = useState("");
-  const [drafts, setDrafts] = useState<{ status: "idle" | "loading" | "ready" | "error"; list: UnfinishedDraft[]; error: string }>({ status: "idle", list: [], error: "" });
-  const [progressError, setProgressError] = useState("");
+  const [optionsRun, setOptionsRun] = useState(false);
+  const [advance, setAdvance] = useState<StepId | null>(null);
 
   const doc = edit.doc;
-  const create = edit.create;
   const pendingIds = useMemo(() => new Set(Object.values(edit.edits).map((e) => e.target.productId)), [edit.edits]);
   const knownTags = useMemo(() => {
     const counts = new Map<string, number>();
@@ -41,68 +44,73 @@ export default function EditProduct() {
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
   }, [products.rows]);
 
+  const options = optionsStatus(edit);
+
+  // The number waiting in each step: edits by the step they belong to, and the options on the Variants step.
+  const counts = useMemo(() => {
+    const out: Partial<Record<StepId, number>> = {};
+    if (!doc) return out;
+    for (const e of Object.values(edit.edits)) {
+      if (e.target.productId !== doc.id) continue;
+      const s = edit.stepOf(e.target);
+      out[s] = (out[s] ?? 0) + 1;
+    }
+    if (options.waiting > 0) out.variants = (out.variants ?? 0) + options.waiting;
+    return out;
+  }, [doc, edit.edits, edit.stepOf, options.waiting]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const shell = (children: React.ReactNode) => (
-    <s-page heading="Edit product" inlineSize="large">
+    <s-page heading="Product Edits" inlineSize="large">
       <PageBody maxWidth={1180}>
         <s-stack gap="large-100">{children}</s-stack>
       </PageBody>
-      {guard.modal}
     </s-page>
   );
 
   // ---- review and undo
   if (edit.mode === "review" || edit.mode === "undo") {
-    const statusKey = create ? `p|${create.productId}|status` : "";
-    const statusApplied = (ids: string[]) => ids.includes(statusKey);
-    const createAfter = create
-      ? async (summary: RunSummary) => {
-          if (!summary.applied.some((c) => c.productId === create.productId)) return;
-          if (finishing) {
-            if (summary.applied.some((c) => c.id === statusKey)) await clearDraftState(liveGql, create.productId);
-          } else {
-            await saveDraftState(liveGql, create.productId, { step: nextStep(CREATE_STEPS, create.step), product: edit.chosen.product, variant: edit.chosen.variant, savedAt: new Date().toISOString() });
-          }
-        }
-      : undefined;
+    const productId = edit.productId;
+    const keepPlace = edit.mode === "review" && edit.entry === "create" && doc?.status === "DRAFT" && productId;
+    const mine = productId ? edit.built.changes.filter((c) => c.productId === productId).length : 0;
     return shell(
       <ReviewScreen
         kind={edit.mode === "undo" ? "undo" : "save"}
         edit={edit}
         shared={shared}
         products={products}
-        applyLabel={finishing ? "Save and make the product active" : undefined}
-        intro={finishing ? "This makes the product active: it is sold and visible once it is published to your markets." : undefined}
-        afterRun={edit.mode === "undo" ? undefined : createAfter}
+        applyLabel={undefined}
+        afterRun={
+          keepPlace
+            ? async (summary) => {
+                if (!summary.applied.some((c) => c.productId === productId)) return;
+                await saveDraftState(liveGql, productId, { step: advance ?? edit.step, product: edit.chosen.product, variant: edit.chosen.variant, savedAt: new Date().toISOString() }).catch(() => undefined);
+              }
+            : undefined
+        }
         onClose={(saved, appliedIds) => {
+          const wasReview = edit.mode === "review";
           edit.setMode("edit");
           if (appliedIds.length) edit.discard(appliedIds);
           if (saved.length) void edit.refresh(saved);
-          if (create && edit.mode === "review") {
-            if (finishing) {
-              if (statusApplied(appliedIds)) {
-                edit.setCreate(null);
-                products.reload();
-                setNotice(`${edit.docs[create.productId]?.title ?? "The product"} is now active. Publish it to your markets with Channels & catalogues.`);
-              } else {
-                edit.discard([statusKey]);
-              }
-              setFinishing(false);
-            } else if (saved.includes(create.productId)) {
-              edit.setCreate({ productId: create.productId, step: nextStep(CREATE_STEPS, create.step) });
-            }
-          }
+          // Move on only when everything for this product was saved; otherwise stay where the problem is.
+          const ok = productId !== null && saved.includes(productId) && appliedIds.length >= mine;
+          if (wasReview && advance && ok) edit.go(advance);
+          setAdvance(null);
         }}
       />,
     );
   }
 
-  const goTo = (issue: Issue) => {
+  const goTo = (issue: { id?: string | null }) => {
     const e = issue.id ? edit.edits[issue.id] : undefined;
     if (!e) return;
     void edit.open(e.target.productId);
-    edit.setTab(tabOf(e.target));
+    edit.go(edit.stepOf(e.target));
   };
 
+  const summary = Object.entries(counts)
+    .map(([s, n]) => `${stepInfo(s as StepId).label} ${n}`)
+    .join(" · ");
   const bar = (
     <ChangesBar
       edits={edit.edits}
@@ -110,35 +118,48 @@ export default function EditProduct() {
       onReview={() => edit.setMode("review")}
       onDiscard={edit.discardAll}
       onGoTo={goTo}
-      primary={!create}
+      primary={false}
+      reviewLabel="Review all changes"
+      summary={doc && summary ? summary : undefined}
+      goLabel={(issue) => {
+        const e = issue.id ? edit.edits[issue.id] : undefined;
+        return e ? `Go to ${stepInfo(edit.stepOf(e.target)).label}` : "Go to the field";
+      }}
     />
   );
 
-  // ---- create product: the basics form
-  if (starting) {
-    return shell(
-      <CreateStart
-        edit={edit}
-        shared={shared}
-        onCancel={() => setStarting(false)}
-        onCreated={(id) => {
-          setStarting(false);
-          edit.setCreate({ productId: id, step: "seo" });
-          void edit.open(id);
-          void shared.settings.reload();
-        }}
-      />,
-    );
-  }
-
-  const loadDrafts = async () => {
-    setDrafts({ status: "loading", list: [], error: "" });
-    try {
-      setDrafts({ status: "ready", list: await listDrafts(liveGql), error: "" });
-    } catch (e) {
-      setDrafts({ status: "error", list: [], error: messageOf(e) });
-    }
-  };
+  // The toggle at the top: make a new product, or edit one that exists.
+  const toggle = (
+    <s-section>
+      <s-stack direction="inline" gap="small-200" alignItems="center">
+        <s-button
+          variant={edit.entry === "create" ? "primary" : "secondary"}
+          accessibilityLabel={`Create${edit.entry === "create" ? " (chosen)" : ""}`}
+          onClick={() => {
+            if (edit.entry !== "create") {
+              edit.setEntry("create");
+              edit.close();
+            }
+          }}
+        >
+          Create
+        </s-button>
+        <s-button
+          variant={edit.entry === "edit" ? "primary" : "secondary"}
+          accessibilityLabel={`Edit${edit.entry === "edit" ? " (chosen)" : ""}`}
+          onClick={() => {
+            if (edit.entry !== "edit") {
+              edit.setEntry("edit");
+              edit.close();
+            }
+          }}
+        >
+          Edit
+        </s-button>
+        <s-text color="subdued">{edit.entry === "create" ? "Make a new draft product, step by step." : "Find a product and change any step."}</s-text>
+      </s-stack>
+    </s-section>
+  );
 
   // ---- no product open
   if (!doc || !edit.productId) {
@@ -146,11 +167,7 @@ export default function EditProduct() {
       <>
         <UndoBar shared={shared} onUndo={() => edit.setMode("undo")} />
         {bar}
-        {notice ? (
-          <s-banner tone="success" heading="Done">
-            <s-paragraph>{notice}</s-paragraph>
-          </s-banner>
-        ) : null}
+        {toggle}
         {shared.info.status === "error" ? (
           <s-banner tone="critical" heading="Could not read your store's languages">
             <s-paragraph>{shared.info.error}</s-paragraph>
@@ -160,8 +177,34 @@ export default function EditProduct() {
           </s-banner>
         ) : shared.info.status !== "ready" ? (
           <Loading message="Reading your store's languages…" />
+        ) : edit.entry === "create" ? (
+          <CreateStart
+            edit={edit}
+            shared={shared}
+            onCreated={(id) => {
+              edit.setEntry("create");
+              void edit.open(id);
+              edit.go("info");
+              void shared.settings.reload();
+            }}
+            onContinue={(d) => {
+              edit.setChosen("product", d.state.product);
+              edit.setChosen("variant", d.state.variant);
+              edit.setEntry("create");
+              void edit.open(d.id);
+              edit.go(normalizeStep(d.state.step) ?? "info");
+            }}
+          />
         ) : (
-          <ProductPicker shared={shared} current={edit.productId} pendingIds={pendingIds} onPick={(id) => void edit.open(id)} />
+          <ProductPicker
+            shared={shared}
+            current={edit.productId}
+            pendingIds={pendingIds}
+            onPick={(id) => {
+              void edit.open(id);
+              edit.go("info");
+            }}
+          />
         )}
         {edit.loading ? <Loading message="Reading the product…" /> : null}
         {edit.error ? (
@@ -169,109 +212,85 @@ export default function EditProduct() {
             <s-paragraph>{edit.error}</s-paragraph>
           </s-banner>
         ) : null}
-        <s-section heading="New product">
-          <s-stack gap="base">
-            <s-text color="subdued">Create a product in steps. It stays a draft until you finish the last step and confirm. You can stop at any step.</s-text>
-            <s-stack direction="inline" gap="small-200">
-              <s-button disabled={!shared.ready || undefined} onClick={() => setStarting(true)}>
-                Create product
-              </s-button>
-              <s-button disabled={drafts.status === "loading" || undefined} onClick={() => void loadDrafts()}>
-                Continue where I left off
-              </s-button>
-            </s-stack>
-            {drafts.status === "loading" ? <Loading message="Looking for unfinished products…" /> : null}
-            {drafts.status === "error" ? <s-text tone="critical">{drafts.error}</s-text> : null}
-            {drafts.status === "ready" && drafts.list.length === 0 ? <s-text color="subdued">No unfinished products.</s-text> : null}
-            {drafts.list.map((d) => (
-              <s-stack key={d.id} direction="inline" gap="small-200" alignItems="center">
-                <s-text>{d.title}</s-text>
-                <s-text color="subdued">{`Step: ${CREATE_STEPS.find((s) => s.id === d.state.step)?.label ?? d.state.step}`}</s-text>
-                <s-button
-                  onClick={() => {
-                    edit.setChosen("product", d.state.product);
-                    edit.setChosen("variant", d.state.variant);
-                    edit.setCreate({ productId: d.id, step: d.state.step });
-                    void edit.open(d.id);
-                  }}
-                >
-                  Continue
-                </s-button>
-              </s-stack>
-            ))}
-          </s-stack>
-        </s-section>
       </>,
     );
   }
 
   // ---- a product is open
-  const props: TabProps = { edit, shared, doc, knownTags, statusLocked: Boolean(create) };
-  const mine = editsOfProduct(edit.edits, doc.id);
-  const counts = countByTab(mine);
+  const props: TabProps = { edit, shared, doc, knownTags, statusLocked: true };
   const title = edit.effectiveValue({ kind: "product", productId: doc.id, field: "title" }) ?? doc.title;
   const store = shared.info.data?.domain.replace(/\.myshopify\.com$/, "") ?? "";
+  const step = edit.step;
+  const waiting = (counts[step] ?? 0) + 0;
+  const productChanges = edit.built.changes.filter((c) => c.productId === doc.id).length;
+  const blocked = edit.built.errors.length > 0 || (step === "variants" && options.problems.length > 0);
 
-  const content = (tab: TabId) => {
-    switch (tab) {
-      case "basic":
-        return <BasicTab {...props} />;
-      case "seo":
-        return <SeoTab {...props} />;
-      case "productMeta":
-        return <MetafieldsTab edit={edit} shared={shared} doc={doc} ownerKind="PRODUCT" />;
-      case "variantMeta":
-        return <MetafieldsTab edit={edit} shared={shared} doc={doc} ownerKind="PRODUCTVARIANT" />;
-      case "type":
-        return <TypeTab {...props} />;
-      case "inventory":
-        return <InventoryTab {...props} />;
-      case "tags":
-        return <TagsTab {...props} />;
-      case "prices":
-        return <PricesTab {...props} />;
+  // The run of the options is a screen of its own (it is reviewed and confirmed like any save).
+  if (optionsRun) {
+    return shell(
+      <VariantsStep
+        edit={edit}
+        shared={shared}
+        doc={doc}
+        running
+        setRunning={setOptionsRun}
+        onSaved={() => {
+          // Other edits of this product may be waiting: show their review before moving on.
+          if (advance) {
+            if (edit.built.changes.some((c) => c.productId === doc.id)) edit.setMode("review");
+            else {
+              edit.go(advance);
+              setAdvance(null);
+            }
+          }
+        }}
+      />,
+    );
+  }
+
+  const next = stepAfter(step);
+  const saveAndNext = () => {
+    if (step === "variants" && options.waiting > 0) {
+      setAdvance(next);
+      setOptionsRun(true);
+      return;
     }
+    if (productChanges > 0) {
+      setAdvance(next);
+      edit.setMode("review");
+      return;
+    }
+    edit.go(next);
   };
 
-  const stepContent = (step: CreateStep) => {
+  const body = () => {
     switch (step) {
-      case "basics":
-        return <BasicTab {...props} />;
-      case "seo":
-        return <SeoTab {...props} />;
-      case "metafields":
-        return <MetafieldsTab edit={edit} shared={shared} doc={doc} ownerKind="PRODUCT" />;
+      case "info":
+        return <InfoStep {...props} />;
       case "variants":
-        return <VariantsStep edit={edit} shared={shared} doc={doc} />;
-      case "type":
-        return <TypeTab {...props} />;
-      case "tags":
-        return <TagsTab {...props} />;
-      case "prices":
-        return <PricesTab {...props} />;
+        return <VariantsStep edit={edit} shared={shared} doc={doc} running={false} setRunning={setOptionsRun} onSaved={() => undefined} />;
+      case "inventory":
+        return <InventoryStep edit={edit} shared={shared} doc={doc} />;
+      case "variantOptions":
+      case "productOptions":
+      case "content":
+      case "leadTimes":
+      case "files":
+        return <CuratedStep edit={edit} shared={shared} doc={doc} step={step as CuratedStepId} />;
+      case "seo":
+        return <SeoStep {...props} />;
+      case "publishing":
+        return <PublishingStep {...props} />;
+      case "review":
+        return <ReviewStep edit={edit} shared={shared} doc={doc} />;
     }
   };
-
-  const saveProgress = (advanceTo: CreateStep | null) =>
-    guard.ask(async () => {
-      if (!create) return;
-      setProgressError("");
-      try {
-        await saveDraftState(liveGql, create.productId, { step: advanceTo ?? create.step, product: edit.chosen.product, variant: edit.chosen.variant, savedAt: new Date().toISOString() });
-        if (advanceTo) edit.setCreate({ productId: create.productId, step: advanceTo });
-      } catch (e) {
-        setProgressError(`Your place was not saved: ${messageOf(e)}`);
-      }
-    });
-
-  const stepIndex = create ? CREATE_STEPS.findIndex((s) => s.id === create.step) : -1;
-  const last = stepIndex === CREATE_STEPS.length - 1;
-  const hasWork = edit.built.changes.length > 0;
 
   return shell(
     <>
       <UndoBar shared={shared} onUndo={() => edit.setMode("undo")} />
       {bar}
+      {toggle}
       <s-section>
         <s-stack gap="base">
           <s-stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
@@ -284,28 +303,17 @@ export default function EditProduct() {
                   Open in Shopify
                 </s-link>
               ) : null}
+              {doc.previewUrl ? (
+                <s-link href={doc.previewUrl} target="_blank">
+                  Preview
+                </s-link>
+              ) : null}
             </s-stack>
-            {create ? (
-              <s-button variant="tertiary" onClick={() => edit.setCreate(null)}>
-                Leave the steps (the draft is kept)
-              </s-button>
-            ) : (
-              <s-button variant="tertiary" onClick={edit.close}>
-                Choose another product
-              </s-button>
-            )}
+            <s-button variant="tertiary" onClick={edit.close}>
+              {edit.entry === "create" ? "Leave the steps (the draft is kept)" : "Choose another product"}
+            </s-button>
           </s-stack>
-          {create ? (
-            <StepStrip current={create.step} onJump={(s) => edit.setCreate({ productId: create.productId, step: s })} />
-          ) : (
-            <s-stack direction="inline" gap="small-200">
-              {TABS.map((t) => (
-                <s-button key={t.id} variant={edit.tab === t.id ? "secondary" : "tertiary"} onClick={() => edit.setTab(t.id)}>
-                  {counts[t.id] > 0 ? `${t.label} (${counts[t.id]})` : t.label}
-                </s-button>
-              ))}
-            </s-stack>
-          )}
+          <StepStrip current={step} counts={counts} onGo={(s) => edit.go(s)} />
         </s-stack>
       </s-section>
 
@@ -316,56 +324,22 @@ export default function EditProduct() {
       ) : null}
       {doc.variantsTruncated ? <s-banner tone="warning">This product has more variants than the editor reads at once. Only the first ones are shown.</s-banner> : null}
 
-      {create ? stepContent(create.step) : content(edit.tab)}
+      {body()}
 
-      {create ? (
-        <s-section>
-          <s-stack gap="small-200">
-            <s-stack direction="inline" gap="small-200">
-              <s-button
-                disabled={stepIndex <= 0 || undefined}
-                onClick={() => {
-                  const prev = CREATE_STEPS[Math.max(0, stepIndex - 1)];
-                  if (prev) edit.setCreate({ productId: create.productId, step: prev.id });
-                }}
-              >
-                Back
-              </s-button>
-              {last ? (
-                <s-button
-                  variant="primary"
-                  disabled={edit.built.errors.length > 0 || undefined}
-                  onClick={() => {
-                    setFinishing(true);
-                    edit.put({ kind: "product", productId: create.productId, field: "status" }, "ACTIVE");
-                    edit.setMode("review");
-                  }}
-                >
-                  Finish and make active
-                </s-button>
-              ) : (
-                <s-button
-                  variant="primary"
-                  disabled={edit.built.errors.length > 0 || undefined}
-                  onClick={() => {
-                    if (hasWork) edit.setMode("review");
-                    else saveProgress(nextStep(CREATE_STEPS, create.step));
-                  }}
-                >
-                  {hasWork ? "Review and save this step" : "Save my place and continue"}
-                </s-button>
-              )}
-            </s-stack>
-            <s-text color="subdued">
-              {last
-                ? "Finishing shows a review, then asks for the password. Only then does the product become active."
-                : "Saving shows a review of this step's changes, then asks for the password. You can stop at any step and continue later."}
-            </s-text>
-            {progressError ? <s-text tone="critical">{progressError}</s-text> : null}
-          </s-stack>
-        </s-section>
-      ) : null}
+      <StepFooter
+        step={step}
+        waiting={waiting}
+        blocked={blocked}
+        onBack={() => edit.go(stepAfter(step, -1))}
+        onSaveNext={saveAndNext}
+        note={
+          step === "review"
+            ? undefined
+            : waiting > 0
+              ? "Saving shows a review first, then asks for the password. The product stays as it is: a new product stays a draft."
+              : "Nothing to save on this step."
+        }
+      />
     </>,
   );
 }
-

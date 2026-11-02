@@ -10,6 +10,7 @@ import { defKey, type Definition } from "../../lib/editor/load";
 import { draftsFromStored, storedFromDrafts, supportOf, translatableMetafield, valueEditable } from "../../lib/editor/mfModel";
 import { formatValue, inputKindOf, isListType, typeLabel, type Draft, type OwnerKind } from "../../lib/editor/mfTypes";
 import { primaryLocale } from "../../lib/editor/locales";
+import { metafieldTranslationTarget } from "../../lib/editor/reviewRows";
 import { newId, saveSets, type SavedSet } from "../../lib/editor/settings";
 import { targetKey, type Target } from "../../lib/editor/model";
 import { onChecked } from "../../lib/dom";
@@ -157,7 +158,7 @@ function SavedSets({ edit, shared }: { edit: EditState; shared: EditorShared }) 
   );
 }
 
-function MetafieldRow({
+export function MetafieldRow({
   edit,
   shared,
   doc,
@@ -166,7 +167,8 @@ function MetafieldRow({
   ownerKind,
   variantName,
   onRemove,
-}: Props & { def: RowDef; ownerId: string; ownerKind: OwnerKind; variantName?: string; onRemove: () => void }) {
+  noTranslations,
+}: Props & { def: RowDef; ownerId: string; ownerKind: OwnerKind; variantName?: string; onRemove?: () => void; /** The screen does not translate its values (variant details, lead times, files). */ noTranslations?: boolean }) {
   const key = mfKey(def.namespace, def.key);
   const type = def.type;
   const target: Target = { kind: "metafield", productId: doc.id, ownerId, ownerKind, namespace: def.namespace, key: def.key, type };
@@ -189,36 +191,38 @@ function MetafieldRow({
 
   const name = variantName ? `${def.name} · ${variantName}` : def.name;
 
-  // Translations: the saved metafield is the thing that is translated.
+  // Translations: the saved metafield is the thing that is translated. Before the value is saved the translation waits
+  // for it (see deferred.ts): the value and its translations can be typed together and are saved in the right order.
   const resourceId = owner?.id ?? null;
-  const showTranslations = shared.slots.length > 0 && editable && translatableHere(type);
+  const trResource = metafieldTranslationTarget(doc, def, "x", { id: ownerId, savedId: resourceId }).resourceId;
+  const showTranslations = !noTranslations && shared.slots.length > 0 && editable && translatableHere(type);
   const sourceText = edit.effectiveValue(target) ?? "";
   const sourceEdited = edited;
   const cells: LangCell[] = showTranslations
     ? shared.slots.map((slot) => {
-        const t: Target = { kind: "translation", productId: doc.id, resourceId: resourceId ?? "", resource: "metafield", field: "value", slot: slot.key, mfType: type };
+        const t = metafieldTranslationTarget(doc, def, slot.key, { id: ownerId, savedId: resourceId });
         const savedTr = resourceId ? doc.translations[resourceId]?.values.value?.[slot.key] : undefined;
-        const value = resourceId ? (edit.effectiveValue(t) ?? "") : "";
-        const isEdited = Boolean(resourceId) && targetKey(t) in edit.edits;
+        const value = edit.effectiveValue(t) ?? "";
+        const isEdited = targetKey(t) in edit.edits;
         const outdated = (savedTr?.outdated ?? false) || (sourceEdited && !isEdited && normText(savedTr?.value) !== "");
         return {
           slot,
           value,
           status: translationStatus(sourceText, value, outdated),
           changed: isEdited,
-          editable: Boolean(resourceId) && saved !== null,
-          note: resourceId ? undefined : "Save the value first, then translate it.",
+          editable: normText(sourceText) !== "",
+          note: normText(sourceText) !== "" ? undefined : "Add the text in the main language first.",
           onChange: (text: string) => edit.put(t, text === "" ? null : text),
         };
       })
     : [];
 
   const removeRow = () => {
-    const keys = Object.keys(edit.edits).filter((k) => k === tkey || (resourceId && k.startsWith(`t|${resourceId}|`)));
+    const keys = Object.keys(edit.edits).filter((k) => k === tkey || k.startsWith(`t|${trResource}|`));
     edit.discard(keys);
-    onRemove();
+    onRemove?.();
   };
-  const hasEdits = edited || Object.keys(edit.edits).some((k) => resourceId && k.startsWith(`t|${resourceId}|`));
+  const hasEdits = edited || Object.keys(edit.edits).some((k) => k.startsWith(`t|${trResource}|`));
 
   const header = (
     <s-stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
@@ -226,7 +230,7 @@ function MetafieldRow({
         <s-text color="subdued">{`${key} · ${typeLabel(type)}`}</s-text>
         {edited ? <s-badge tone="info">Edited</s-badge> : null}
       </s-stack>
-      {asking ? (
+      {!onRemove ? null : asking ? (
         <s-stack direction="inline" gap="small-200" alignItems="center">
           <s-text>Remove this row and discard its unsaved edits?</s-text>
           <s-button tone="critical" onClick={removeRow}>
@@ -266,7 +270,7 @@ function MetafieldRow({
           {header}
           {def.description ? <s-text color="subdued">{def.description}</s-text> : null}
           {editor}
-          {shared.slots.length > 0 && !translatableMetafield(type) ? <s-text color="subdued">Shopify does not translate this type of value here.</s-text> : null}
+          {!noTranslations && shared.slots.length > 0 && !translatableMetafield(type) ? <s-text color="subdued">Shopify does not translate this type of value here.</s-text> : null}
         </s-stack>
       </s-section>
     );

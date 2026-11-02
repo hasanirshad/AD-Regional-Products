@@ -22,7 +22,9 @@ describe("type helpers", () => {
     expect(isListType("list.product_reference")).toBe(true);
     expect(isListType("single_line_text_field")).toBe(false);
     expect(inputKindOf("list.product_reference")).toBe("ref-product");
-    expect(inputKindOf("file_reference")).toBe("unsupported");
+    expect(inputKindOf("file_reference")).toBe("ref-file");
+    expect(inputKindOf("list.metaobject_reference")).toBe("ref-metaobject");
+    expect(inputKindOf("customer_reference")).toBe("unsupported");
   });
 
   it("labels types in plain words", () => {
@@ -33,7 +35,8 @@ describe("type helpers", () => {
   it("offers add/remove only for lists, and only delete for unsupported types", () => {
     expect(opsFor("single_line_text_field")).toEqual(["set", "clear"]);
     expect(opsFor("list.single_line_text_field")).toEqual(["add", "remove", "set", "clear"]);
-    expect(opsFor("file_reference")).toEqual(["clear"]);
+    expect(opsFor("customer_reference")).toEqual(["clear"]);
+    expect(opsFor("file_reference")).toEqual(["set", "clear"]);
   });
 
   it("only plain single text can be translated here", () => {
@@ -169,8 +172,8 @@ describe("computeNext", () => {
   });
 
   it("refuses unsupported types except delete", () => {
-    expect(computeNext("file_reference", "gid://x", "set", ["a"]).error).toBeTruthy();
-    expect(computeNext("file_reference", "gid://x", "clear", []).next).toBeNull();
+    expect(computeNext("customer_reference", "gid://x", "set", ["a"]).error).toBeTruthy();
+    expect(computeNext("customer_reference", "gid://x", "clear", []).next).toBeNull();
   });
 
   it("encodes list and single values", () => {

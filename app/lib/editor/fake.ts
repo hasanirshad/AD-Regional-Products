@@ -33,10 +33,16 @@ export type FakeProduct = {
   seoTitle: string;
   seoDescription: string;
   category: { id: string; name: string } | null;
-  options: { name: string; values: string[] }[];
+  options: { name: string; values: string[]; id?: string; valueIds?: string[] }[];
+  templateSuffix: string;
+  /** Publications (sales channels and market catalogues) the product is published to. */
+  publicationIds: string[];
   variants: FakeVariant[];
   metafields: Record<string, { id: string; type: string; value: string }>;
 };
+
+const levelId = (itemId: string, locationId: string) => `level:${itemId}:${locationId}`;
+const levelNodes = (v: FakeVariant) => Object.entries(v.levels).map(([loc, q]) => ({ id: levelId(v.itemId, loc), location: { id: loc }, quantities: [{ name: "available", quantity: q }] }));
 
 export type FakeTranslation = { value: string; outdated: boolean };
 
@@ -60,6 +66,11 @@ export class FakeShopify {
   ];
   locations = [{ id: "gid://shopify/Location/1", name: "Lahore warehouse" }];
   definitions: { id: string; ownerType: string; namespace: string; key: string; name: string; description?: string; type: { name: string }; validations?: { name: string; value: string | null }[] }[] = [];
+  metaobjectDefinitions: { id: string; type: string; name: string }[] = [];
+  metaobjects: { id: string; type: string; displayName: string | null; handle: string }[] = [];
+  files: { __typename: string; id: string; alt?: string | null; image?: { url: string } | null; url?: string | null; mimeType?: string | null; filename?: string | null }[] = [];
+  /** Page size of the metaobject and file lists (small, so tests can page). */
+  pageSize = 50;
   categories = [{ id: "gid://shopify/TaxonomyCategory/hg-3-1", name: "Dining Tables", fullName: "Home & Garden > Furniture > Tables > Dining Tables", isLeaf: true }];
   private nextId = 1000;
 
@@ -117,8 +128,32 @@ export class FakeShopify {
 
   private userError(op: string, message: string): unknown {
     const root = op.replace("Editor", "");
-    const key = { ProductCreate: "productCreate", OptionsCreate: "productOptionsCreate", SaveSetting: "metafieldsSet", ProductUpdate: "productUpdate", VariantsUpdate: "productVariantsBulkUpdate", MetafieldsSet: "metafieldsSet", MetafieldsDelete: "metafieldsDelete", StockSet: "inventorySetQuantities", TranslationsRegister: "translationsRegister", TranslationsRemove: "translationsRemove" }[root] ?? root;
+    const key = { ProductCreate: "productCreate", OptionsCreate: "productOptionsCreate", SaveSetting: "metafieldsSet", ProductUpdate: "productUpdate", VariantsUpdate: "productVariantsBulkUpdate", MetafieldsSet: "metafieldsSet", MetafieldsDelete: "metafieldsDelete", StockSet: "inventorySetQuantities", OptionUpdate: "productOptionUpdate", OptionsReorder: "productOptionsReorder", StockActivate: "inventoryActivate", StockDeactivate: "inventoryDeactivate", Publish: "publishablePublish", Unpublish: "publishableUnpublish", TranslationsRegister: "translationsRegister", TranslationsRemove: "translationsRemove" }[root] ?? root;
     return { [key]: { userErrors: [{ field: ["x"], message }] } };
+  }
+
+  /** Gives every option and value a stable id (once), then lists them the way Shopify does. */
+  private optionNodes(p: FakeProduct) {
+    for (const o of p.options) {
+      o.id ??= `gid://shopify/ProductOption/${this.nextId++}`;
+      o.valueIds ??= [];
+      while (o.valueIds.length < o.values.length) o.valueIds.push(`gid://shopify/ProductOptionValue/${this.nextId++}`);
+      this.setSource(o.id, "name", o.name);
+      o.values.forEach((v, i) => this.setSource(o.valueIds![i]!, "name", v));
+    }
+    return p.options.map((o, i) => ({ id: o.id!, name: o.name, position: i + 1, optionValues: o.values.map((name, j) => ({ id: o.valueIds![j]!, name })) }));
+  }
+
+  /** Variants for every combination of the current options; variants that already exist keep their data. */
+  private rebuildVariants(p: FakeProduct): void {
+    const combos = p.options.reduce<string[][]>((acc, o) => acc.flatMap((row) => o.values.map((v) => [...row, v])), [[]]);
+    const old = p.variants;
+    p.variants = combos.map((combo, i) => {
+      const title = combo.join(" / ");
+      const keep = old.find((v) => v.title === title);
+      if (keep) return { ...keep, position: i + 1 };
+      return fakeVariant(`${p.id}-v${this.nextId++}`, { position: i + 1, price: "0.00", sku: null, title, selectedOptions: combo.map((value, n) => ({ name: p.options[n]!.name, value })) });
+    });
   }
 
   private variantById(id: string): { p: FakeProduct; v: FakeVariant } | undefined {
@@ -150,7 +185,10 @@ export class FakeShopify {
             tags: p.tags,
             seo: { title: p.seoTitle, description: p.seoDescription },
             category: p.category,
-            options: p.options.map((o) => ({ name: o.name, optionValues: o.values.map((n) => ({ name: n })) })),
+            templateSuffix: p.templateSuffix || null,
+            onlineStorePreviewUrl: `https://shop.example/products/${p.handle}?preview_key=abc`,
+            options: this.optionNodes(p),
+            resourcePublicationsV2: { nodes: p.publicationIds.map((id) => ({ publication: { id } })) },
             variantsCount: { count: p.variants.length },
             metafields: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: Object.entries(p.metafields).map(([k, m]) => ({ id: m.id, namespace: k.split(".")[0], key: k.split(".").slice(1).join("."), type: m.type, value: m.value, compareDigest: `cd:${m.value}` })) },
           },
@@ -176,7 +214,7 @@ export class FakeShopify {
                   id: v.itemId,
                   tracked: v.tracked,
                   sku: v.sku,
-                  inventoryLevels: { nodes: Object.entries(v.levels).map(([loc, q]) => ({ location: { id: loc }, quantities: [{ name: "available", quantity: q }] })) },
+                  inventoryLevels: { nodes: levelNodes(v) },
                 },
               })),
             },
@@ -250,7 +288,7 @@ export class FakeShopify {
           nodes: (vars.ids as string[]).map((id) => {
             const p = this.products.get(id);
             return p
-              ? { id, title: p.title, handle: p.handle, descriptionHtml: p.descriptionHtml, vendor: p.vendor, status: p.status, productType: p.productType, tags: p.tags, seo: { title: p.seoTitle, description: p.seoDescription }, category: p.category }
+              ? { id, title: p.title, handle: p.handle, descriptionHtml: p.descriptionHtml, vendor: p.vendor, status: p.status, productType: p.productType, tags: p.tags, seo: { title: p.seoTitle, description: p.seoDescription }, category: p.category, templateSuffix: p.templateSuffix || null }
               : null;
           }),
         };
@@ -265,9 +303,85 @@ export class FakeShopify {
         return {
           nodes: (vars.ids as string[]).map((id) => {
             const f = this.variantById(id);
-            return f ? { id, inventoryItem: { inventoryLevels: { nodes: Object.entries(f.v.levels).map(([loc, q]) => ({ location: { id: loc }, quantities: [{ name: "available", quantity: q }] })) } } } : null;
+            return f ? { id, inventoryItem: { inventoryLevels: { nodes: levelNodes(f.v) } } } : null;
           }),
         };
+      case "EditorMetaobjectDefinition":
+        return { metaobjectDefinition: this.metaobjectDefinitions.find((d) => d.id === vars.id) ?? null };
+      case "EditorMetaobjects": {
+        const all = this.metaobjects.filter((m) => m.type === vars.type);
+        const start = vars.after ? Number(vars.after) : 0;
+        const page = all.slice(start, start + Math.min(this.pageSize, Number(vars.first)));
+        const end = start + page.length;
+        return { metaobjects: { pageInfo: { hasNextPage: end < all.length, endCursor: String(end) }, nodes: page.map((m) => ({ id: m.id, displayName: m.displayName, handle: m.handle })) } };
+      }
+      case "EditorFiles": {
+        const start = vars.after ? Number(vars.after) : 0;
+        const page = this.files.slice(start, start + Math.min(this.pageSize, Number(vars.first)));
+        const end = start + page.length;
+        return { files: { pageInfo: { hasNextPage: end < this.files.length, endCursor: String(end) }, nodes: page } };
+      }
+      case "EditorMetaobjectLabels":
+        return { nodes: (vars.ids as string[]).map((id) => this.metaobjects.find((m) => m.id === id)).map((m) => (m ? { id: m.id, displayName: m.displayName, handle: m.handle } : null)) };
+      case "EditorFileLabels":
+        return { nodes: (vars.ids as string[]).map((id) => this.files.find((f) => f.id === id) ?? null) };
+      case "EditorStockLevels":
+        return {
+          nodes: (vars.ids as string[]).map((id) => {
+            const f = this.variantById(id);
+            return f ? { id, inventoryItem: { inventoryLevels: { nodes: levelNodes(f.v).map((l) => ({ id: l.id, location: l.location })) } } } : null;
+          }),
+        };
+      case "ReadPublicationIds":
+        return {
+          nodes: (vars.ids as string[]).map((id) => {
+            const p = this.products.get(id);
+            return p ? { id, resourcePublicationsV2: { nodes: p.publicationIds.map((x) => ({ publication: { id: x } })) } } : null;
+          }),
+        };
+      case "ReadMetafieldIds": {
+        const wanted = [...query.matchAll(/m(\d+): metafield\(namespace: "([^"]*)", key: "([^"]*)"\)/g)].map((m) => ({ alias: `m${m[1]}`, namespace: m[2]!, key: m[3]! }));
+        return {
+          nodes: (vars.ids as string[]).map((id) => {
+            const owner = this.ownerMetafields(id);
+            if (!owner) return null;
+            const node: Record<string, unknown> = { id };
+            for (const w of wanted) {
+              const m = owner[`${w.namespace}.${w.key}`];
+              node[w.alias] = m ? { id: m.id, value: m.value } : null;
+            }
+            return node;
+          }),
+        };
+      }
+      case "EditorStockActivate": {
+        const f = [...this.products.values()].flatMap((p) => p.variants).find((v) => v.itemId === vars.itemId);
+        if (!f) return { inventoryActivate: { inventoryLevel: null, userErrors: [{ field: ["inventoryItemId"], message: "Inventory item not found" }] } };
+        if (!this.locations.some((l) => l.id === vars.locationId) && vars.locationId !== LOC_B) return { inventoryActivate: { inventoryLevel: null, userErrors: [{ field: ["locationId"], message: "Location not found" }] } };
+        if (!this.ignore.has(op) && !((vars.locationId as string) in f.levels)) f.levels[vars.locationId as string] = 0;
+        return { inventoryActivate: { inventoryLevel: { id: levelId(f.itemId, vars.locationId as string) }, userErrors: [] } };
+      }
+      case "EditorStockDeactivate": {
+        const id = vars.id as string;
+        for (const v of [...this.products.values()].flatMap((p) => p.variants)) {
+          for (const loc of Object.keys(v.levels)) {
+            if (levelId(v.itemId, loc) !== id) continue;
+            if (Object.keys(v.levels).length === 1) return { inventoryDeactivate: { userErrors: [{ message: "The inventory level can't be deactivated because it is the only one this item has." }] } };
+            if (!this.ignore.has(op)) delete v.levels[loc];
+            return { inventoryDeactivate: { userErrors: [] } };
+          }
+        }
+        return { inventoryDeactivate: { userErrors: [{ message: "Inventory level not found" }] } };
+      }
+      case "EditorPublish":
+      case "EditorUnpublish": {
+        const p = this.products.get(vars.id as string);
+        const key = op === "EditorPublish" ? "publishablePublish" : "publishableUnpublish";
+        if (!p) return { [key]: { userErrors: [{ field: ["id"], message: "Product not found" }] } };
+        const ids = (vars.input as { publicationId: string }[]).map((x) => x.publicationId);
+        if (!this.ignore.has(op)) p.publicationIds = op === "EditorPublish" ? [...new Set([...p.publicationIds, ...ids])] : p.publicationIds.filter((x) => !ids.includes(x));
+        return { [key]: { userErrors: [] } };
+      }
       case "EditorTranslations":
       case "EditorDigests": {
         const slots = [...query.matchAll(/t(\d+): translations\(locale: \$l\d+(?:, marketId: \$m\d+)?\)/g)].map((m) => Number(m[1]));
@@ -313,6 +427,7 @@ export class FakeShopify {
           outdate("body_html");
         }
         if ("vendor" in input) p.vendor = input.vendor as string;
+        if ("templateSuffix" in input) p.templateSuffix = (input.templateSuffix as string | null) ?? "";
         if ("status" in input) p.status = input.status as string;
         if ("productType" in input) {
           p.productType = input.productType as string;
@@ -456,12 +571,90 @@ export class FakeShopify {
         if (!p) return { productOptionsCreate: { product: null, userErrors: [{ field: ["productId"], message: "Product not found" }] } };
         const options = vars.options as { name: string; values: { name: string }[] }[];
         if (this.ignore.has(op)) return { productOptionsCreate: { product: { id: p.id }, userErrors: [] } };
-        p.options = options.map((o) => ({ name: o.name, values: o.values.map((v) => v.name) }));
-        const combos = p.options.reduce<string[][]>((acc, o) => acc.flatMap((row) => o.values.map((v) => [...row, v])), [[]]);
-        p.variants = combos.map((combo, i) =>
-          fakeVariant(`${p.id}-v${i + 1}`, { position: i + 1, price: "0.00", sku: null, title: combo.join(" / "), selectedOptions: combo.map((value, n) => ({ name: p.options[n]!.name, value })) }),
-        );
+        const onlyDefault = p.options.length === 0 || (p.options.length === 1 && p.options[0]!.name === "Title");
+        if (onlyDefault) p.options = [];
+        if (p.options.length + options.length > 3) return { productOptionsCreate: { product: null, userErrors: [{ field: ["options"], message: "Options count is over the limit of 3" }] } };
+        for (const o of options) {
+          if (p.options.some((x) => x.name.toLowerCase() === o.name.toLowerCase())) return { productOptionsCreate: { product: null, userErrors: [{ field: ["options"], message: `Option '${o.name}' already exists` }] } };
+          p.options.push({ name: o.name, values: o.values.map((v) => v.name) });
+        }
+        if (onlyDefault) p.variants = [];
+        this.optionNodes(p);
+        if (onlyDefault) this.rebuildVariants(p);
+        else {
+          // A new option on a product that has variants: every existing variant takes the new option's first value.
+          for (const o of options) for (const v of p.variants) {
+            v.selectedOptions.push({ name: o.name, value: o.values[0]!.name });
+            v.title = `${v.title} / ${o.values[0]!.name}`;
+          }
+          this.rebuildVariants(p);
+        }
         return { productOptionsCreate: { product: { id: p.id }, userErrors: [] } };
+      }
+      case "EditorOptionUpdate": {
+        const p = this.products.get(vars.productId as string);
+        const input = vars.option as { id: string; name?: string };
+        if (!p) return { productOptionUpdate: { product: null, userErrors: [{ field: ["productId"], message: "Product not found" }] } };
+        this.optionNodes(p);
+        const idx = p.options.findIndex((o) => o.id === input.id);
+        if (idx < 0) return { productOptionUpdate: { product: null, userErrors: [{ field: ["option"], message: "Option not found" }] } };
+        if (this.ignore.has(op)) return { productOptionUpdate: { product: { id: p.id }, userErrors: [] } };
+        const o = p.options[idx]!;
+        const outdate = (id: string) => {
+          for (const bySlot of this.translations.get(id)?.get("name")?.values() ?? []) bySlot.outdated = true;
+        };
+        for (const u of (vars.update as { id: string; name: string }[] | undefined) ?? []) {
+          const j = o.valueIds!.indexOf(u.id);
+          if (j < 0) return { productOptionUpdate: { product: null, userErrors: [{ field: ["optionValuesToUpdate"], message: "Option value not found" }] } };
+          const from = o.values[j]!;
+          o.values[j] = u.name;
+          for (const v of p.variants) if (v.selectedOptions[idx]?.value === from) {
+            v.selectedOptions[idx]!.value = u.name;
+            v.title = v.selectedOptions.map((x) => x.value).join(" / ");
+          }
+          this.setSource(u.id, "name", u.name);
+          outdate(u.id);
+        }
+        for (const a of (vars.add as { name: string }[] | undefined) ?? []) {
+          if (o.values.some((x) => x.toLowerCase() === a.name.toLowerCase())) return { productOptionUpdate: { product: null, userErrors: [{ field: ["optionValuesToAdd"], message: `Option value '${a.name}' already exists` }] } };
+          o.values.push(a.name);
+        }
+        if (input.name !== undefined && input.name !== o.name) {
+          o.name = input.name;
+          for (const v of p.variants) v.selectedOptions[idx]!.name = input.name;
+          this.setSource(o.id!, "name", input.name);
+          outdate(o.id!);
+        }
+        this.optionNodes(p);
+        this.rebuildVariants(p);
+        return { productOptionUpdate: { product: { id: p.id }, userErrors: [] } };
+      }
+      case "EditorOptionsReorder": {
+        const p = this.products.get(vars.productId as string);
+        if (!p) return { productOptionsReorder: { product: null, userErrors: [{ field: ["productId"], message: "Product not found" }] } };
+        this.optionNodes(p);
+        const want = vars.options as { id: string; values: { id: string }[] }[];
+        if (this.ignore.has(op)) return { productOptionsReorder: { product: { id: p.id }, userErrors: [] } };
+        const next = want.map((w) => p.options.find((o) => o.id === w.id));
+        if (next.some((o) => !o) || next.length !== p.options.length) return { productOptionsReorder: { product: null, userErrors: [{ field: ["options"], message: "Every option must be listed" }] } };
+        // Variants keep the order of their option columns, so rebuild after reordering.
+        const colOf = new Map(p.options.map((o, i) => [o.id!, i]));
+        for (const v of p.variants) {
+          v.selectedOptions = want.map((w) => v.selectedOptions[colOf.get(w.id)!]!);
+          v.title = v.selectedOptions.map((x) => x.value).join(" / ");
+        }
+        p.options = want.map((w) => {
+          const o = p.options.find((x) => x.id === w.id)!;
+          const order = w.values.map((x) => o.valueIds!.indexOf(x.id));
+          return { ...o, values: order.map((i) => o.values[i]!), valueIds: order.map((i) => o.valueIds![i]!) };
+        });
+        this.rebuildVariants(p);
+        return { productOptionsReorder: { product: { id: p.id }, userErrors: [] } };
+      }
+      case "EditorOptionsRead": {
+        const p = this.products.get(vars.id as string);
+        if (!p) return { product: null };
+        return { product: { variantsCount: { count: p.variants.length }, options: this.optionNodes(p) } };
       }
       default:
         throw new Error(`FakeShopify: no answer for ${op}`);
@@ -505,6 +698,8 @@ export function fakeProduct(id: string, extra: Partial<FakeProduct> = {}): FakeP
     seoDescription: "",
     category: null,
     options: [],
+    templateSuffix: "",
+    publicationIds: [],
     variants: [fakeVariant(`${id}-v1`)],
     metafields: {},
     ...extra,

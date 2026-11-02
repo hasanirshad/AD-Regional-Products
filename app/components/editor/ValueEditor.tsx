@@ -2,11 +2,13 @@
 // lists (add, remove, reorder), choices from the definition, and references picked with Shopify's own picker.
 // The value is checked as it is typed (mfModel.storedFromDrafts); problems show under the box.
 
+import { useState } from "react";
 import { choicesOf } from "../../lib/editor/mfModel";
 import { isRefKind, newDraft } from "../../lib/editor/mfModel";
 import type { Validation } from "../../lib/editor/mfRules";
 import { inputKindOf, isListType, unitsFor, type Draft, type InputKind } from "../../lib/editor/mfTypes";
 import { SelectField } from "../SelectField";
+import { ReferenceDialog } from "./ReferenceDialog";
 import { TextBox } from "./TextBox";
 
 const HINT: Partial<Record<InputKind, string>> = {
@@ -32,11 +34,14 @@ async function pick(kind: ResourceKind, multiple: boolean, current: string[]): P
   return Array.from(result).map((p) => ({ id: p.id, label: p.title ?? p.displayName ?? p.id }));
 }
 
-function RefPicker({ type, draft, onChange, disabled, name }: { type: string; draft: Draft; onChange: (d: Draft) => void; disabled?: boolean; name: string }) {
+function RefPicker({ type, validations, draft, onChange, disabled, name }: { type: string; validations: Validation[]; draft: Draft; onChange: (d: Draft) => void; disabled?: boolean; name: string }) {
   const kind = inputKindOf(type);
   const list = isListType(type);
+  const ownPicker = kind === "ref-metaobject" || kind === "ref-file";
+  const [open, setOpen] = useState(false);
   const resource: ResourceKind = kind === "ref-variant" ? "variant" : kind === "ref-collection" ? "collection" : "product";
-  const word = resource === "variant" ? "variants" : resource === "collection" ? "collections" : "products";
+  const noun = kind === "ref-file" ? "file" : kind === "ref-metaobject" ? "entry" : resource;
+  const word = kind === "ref-file" ? "files" : kind === "ref-metaobject" ? "entries" : resource === "variant" ? "variants" : resource === "collection" ? "collections" : "products";
   const move = (i: number, d: number) => {
     const refs = [...draft.refs];
     const j = i + d;
@@ -46,7 +51,7 @@ function RefPicker({ type, draft, onChange, disabled, name }: { type: string; dr
   };
   return (
     <s-stack gap="small-200">
-      {draft.refs.length === 0 ? <s-text color="subdued">{`No ${list ? word : resource} picked.`}</s-text> : null}
+      {draft.refs.length === 0 ? <s-text color="subdued">{`No ${list ? word : noun} picked.`}</s-text> : null}
       {draft.refs.map((r, i) => (
         <s-stack key={r.id} direction="inline" gap="small-200" alignItems="center">
           <s-text>{r.label}</s-text>
@@ -72,13 +77,28 @@ function RefPicker({ type, draft, onChange, disabled, name }: { type: string; dr
           <s-button
             accessibilityLabel={`Pick ${word} for ${name}`}
             onClick={async () => {
+              if (ownPicker) return setOpen(true);
               const picked = await pick(resource, list, draft.refs.map((r) => r.id));
               if (picked) onChange({ ...draft, refs: list ? picked : picked.slice(0, 1) });
             }}
           >
-            {list ? `Pick ${word}` : draft.refs.length > 0 ? `Change ${resource}` : `Pick a ${resource}`}
+            {list ? `Pick ${word}` : draft.refs.length > 0 ? `Change ${noun}` : `Pick a ${noun}`}
           </s-button>
         </div>
+      ) : null}
+      {open ? (
+        <ReferenceDialog
+          kind={kind === "ref-file" ? "file" : "metaobject"}
+          validations={validations}
+          multiple={list}
+          current={draft.refs}
+          name={name}
+          onCancel={() => setOpen(false)}
+          onDone={(refs) => {
+            setOpen(false);
+            onChange({ ...draft, refs: list ? refs : refs.slice(0, 1) });
+          }}
+        />
       ) : null}
     </s-stack>
   );
@@ -158,7 +178,7 @@ export function ValueEditor({
     const draft = drafts[0] ?? newDraft(type, validations);
     return (
       <s-stack gap="small-200">
-        <RefPicker type={type} draft={draft} onChange={(d) => onChange([d])} disabled={disabled} name={name} />
+        <RefPicker type={type} validations={validations} draft={draft} onChange={(d) => onChange([d])} disabled={disabled} name={name} />
         {error ? <s-text tone="critical">{error}</s-text> : null}
       </s-stack>
     );

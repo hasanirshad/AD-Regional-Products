@@ -36,7 +36,7 @@ describe("createEngine", () => {
     expect(rows[0]!.status).toBe("done");
     expect(created).not.toBe("");
     const state = parseDraftState(shop.appData.get(created)!.get("draft_state"));
-    expect(state).toMatchObject({ step: "seo", product: ["custom.material"] });
+    expect(state).toMatchObject({ step: "info", product: ["custom.material"] });
   });
 
   it("reports a failure without handing over an id", async () => {
@@ -67,14 +67,14 @@ describe("unfinished drafts", () => {
     shop.appData.set(a.id, new Map([["draft_state", JSON.stringify({ version: 1, step: "tags", product: [], variant: [], savedAt: "t" })]]));
     const drafts = await listDrafts(shop.gql);
     expect(drafts.map((d) => d.title)).toEqual(["A"]);
-    expect(drafts[0]!.state.step).toBe("tags");
+    expect(drafts[0]!.state.step).toBe("info");
   });
 });
 
 describe("steps", () => {
   it("moves to the next step and stays on the last", () => {
-    expect(nextStep(CREATE_STEPS, "basics")).toBe("seo");
-    expect(nextStep(CREATE_STEPS, "prices")).toBe("prices");
+    expect(nextStep(CREATE_STEPS, "info")).toBe("variants");
+    expect(nextStep(CREATE_STEPS, "review")).toBe("review");
   });
 });
 

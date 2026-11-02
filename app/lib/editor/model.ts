@@ -19,7 +19,8 @@ export type ProductField =
   | "handle"
   | "productType"
   | "category"
-  | "tags";
+  | "tags"
+  | "templateSuffix";
 
 export type VariantField = "price" | "compareAtPrice" | "sku" | "barcode" | "tracked" | "policy";
 
@@ -36,19 +37,27 @@ export type Target =
       key: string;
       type: string;
     }
+  /** The quantity at one location. null = the variant is not stocked there (setting a number stocks it, null removes it). */
   | { kind: "stock"; productId: string; variantId: string; itemId: string; locationId: string }
+  /** Whether the product is published to one sales channel or market catalogue ("true" / "false"). */
+  | { kind: "publish"; productId: string; publicationId: string }
   | {
       kind: "translation";
       productId: string;
       /** The product gid, or the metafield gid. */
       resourceId: string;
-      resource: "product" | "metafield";
+      resource: "product" | "metafield" | "option" | "optionValue";
       /** Shopify's translatable key: title, body_html, meta_title, meta_description, handle, product_type, or value (a metafield). */
       field: string;
       /** A language code, or a language and a market (see locales.ts). */
       slot: string;
       /** For a metafield translation: its type, so rich text can be shown as markup. */
       mfType?: string;
+      /**
+       * A translation of a metafield that has no saved value yet. `resourceId` is then only a stand-in; the real id is
+       * looked up after the value is saved (in the same run), so the value and its translations are entered together.
+       */
+      defer?: { ownerId: string; namespace: string; key: string };
     };
 
 /** A stable text name for a target. Used as the key of pending edits and changes. */
@@ -62,12 +71,14 @@ export function targetKey(t: Target): string {
       return `m|${t.ownerId}|${t.namespace}.${t.key}`;
     case "stock":
       return `s|${t.variantId}|${t.locationId}`;
+    case "publish":
+      return `pub|${t.productId}|${t.publicationId}`;
     case "translation":
       return `t|${t.resourceId}|${t.field}|${t.slot}`;
   }
 }
 
-export type TabId = "basic" | "seo" | "productMeta" | "variantMeta" | "type" | "inventory" | "tags" | "prices";
+export type TabId = "basic" | "seo" | "productMeta" | "variantMeta" | "type" | "inventory" | "tags" | "prices" | "publishing";
 
 export const TABS: { id: TabId; label: string }[] = [
   { id: "basic", label: "Basic data" },
@@ -78,6 +89,7 @@ export const TABS: { id: TabId; label: string }[] = [
   { id: "inventory", label: "Inventory" },
   { id: "tags", label: "Tags" },
   { id: "prices", label: "Prices" },
+  { id: "publishing", label: "Publishing" },
 ];
 
 export const tabLabel = (id: TabId): string => TABS.find((t) => t.id === id)?.label ?? id;
@@ -101,12 +113,16 @@ export function tabOf(t: Target): TabId {
           return "type";
         case "tags":
           return "tags";
+        case "templateSuffix":
+          return "basic";
       }
       return "basic";
     case "variant":
       return t.field === "price" || t.field === "compareAtPrice" ? "prices" : "inventory";
     case "stock":
       return "inventory";
+    case "publish":
+      return "publishing";
     case "metafield":
       return t.ownerKind === "PRODUCT" ? "productMeta" : "variantMeta";
     case "translation":
@@ -146,6 +162,7 @@ export const PRODUCT_FIELD_LABEL: Record<ProductField, string> = {
   productType: "Product type",
   category: "Category",
   tags: "Tags",
+  templateSuffix: "PDP template",
 };
 
 export const VARIANT_FIELD_LABEL: Record<VariantField, string> = {

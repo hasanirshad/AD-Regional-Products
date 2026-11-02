@@ -31,6 +31,8 @@ export type ChangeContext = {
   metafieldName: (t: Extract<Target, { kind: "metafield" }>) => string;
   /** Names the thing a metafield translation belongs to, such as "Length · Oak / 180". Without it the label says "Metafield value". */
   resourceName?: (t: Extract<Target, { kind: "translation" }>) => string | undefined;
+  /** The name of a sales channel or market catalogue. */
+  publicationName?: (publicationId: string) => string | undefined;
 };
 
 export function labelOf(t: Target, ctx: ChangeContext): string {
@@ -45,6 +47,8 @@ export function labelOf(t: Target, ctx: ChangeContext): string {
     }
     case "stock":
       return `Available · ${ctx.variantTitle(t.variantId)} · ${ctx.locationName(t.locationId)}`;
+    case "publish":
+      return `Published · ${ctx.publicationName?.(t.publicationId) ?? "sales channel"}`;
     case "translation": {
       const what = t.resource === "metafield" ? (ctx.resourceName?.(t) ?? `Metafield ${t.field}`) : (translationFieldLabel(t.field) ?? t.field);
       return `${ctx.slotLabel(t.slot)} · ${what}`;
@@ -60,6 +64,7 @@ const TRANSLATION_FIELD_LABEL: Record<string, string> = {
   handle: "URL handle",
   product_type: "Product type",
   value: "Value",
+  name: "Name",
 };
 export const translationFieldLabel = (key: string): string | undefined => TRANSLATION_FIELD_LABEL[key];
 
@@ -183,9 +188,20 @@ function check(c: Change, ctx: ChangeContext, errors: Issue[], warnings: Issue[]
   }
 
   if (t.kind === "stock") {
+    if (after === null) {
+      // Removing a location: the units there are lost.
+      const was = parseNumber(c.before);
+      if (was !== null && was > 0) warn(`Takes this variant out of the location. Its ${was} unit${was === 1 ? "" : "s"} there are no longer counted.`);
+      return;
+    }
     const n = parseNumber(after);
     if (n === null || !Number.isInteger(n)) bad("Enter a whole number.");
     else if (n < 0) bad("The quantity cannot be negative.");
+    return;
+  }
+
+  if (t.kind === "publish") {
+    if (after !== "true" && after !== "false") bad("Choose published or not published.");
     return;
   }
 

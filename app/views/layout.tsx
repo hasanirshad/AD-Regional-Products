@@ -54,7 +54,7 @@ export default function Layout() {
         <s-link href="/inventory">Inventory</s-link>
         <s-link href="/links">Storefront links</s-link>
         <s-link href="/check">Product check</s-link>
-        <s-link href="/edit">Edit product</s-link>
+        <s-link href="/edit">Product Edits</s-link>
         <s-link href="/bulk">Bulk edit</s-link>
         <s-link href="/settings">Block settings</s-link>
       </s-app-nav>

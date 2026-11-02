@@ -1,6 +1,6 @@
-# Product editor: Edit product and Bulk edit
+# Product editor: Product Edits and Bulk edit
 
-Added 2026-10-28. Two pages in AD Regional Products: **Edit product** (`/edit`) and **Bulk edit** (`/bulk`).
+Added 2026-10-28. Two pages in AD Regional Products: **Product Edits** (`/edit`, called *Edit product* until 2026-11-02) and **Bulk edit** (`/bulk`).
 They change product content (title, description, SEO, handle, vendor, type, category, status, tags, price and
 compare-at, stock, metafields) and translations of those fields. Product first: you pick the product, then the field.
 (AD MetaFields is the opposite: metafield first.)
@@ -16,29 +16,52 @@ compare-at, stock, metafields) and translations of those fields. Product first: 
 - **No database.** Anything saved lives inside Shopify (below).
 - Admin API `2026-07` (same as the rest of the app).
 
-## Edit product
+## Product Edits (rebuilt 2026-11-02)
 
-Product picker (Shopify searches title, handle or SKU; pins), then tabs: Basic data, SEO, Product metafields, Variant
-metafields, Type and category, Inventory, Tags, Prices. On every text field the source value and one box per market
-language sit side by side with a status: translated, missing, same as source, outdated, no source text.
-A sticky **Changes** bar counts edits across all tabs; **Review changes** lists them all (now / after) with ONE confirmation
-and ONE password. Edits stay while you move between tabs, products and languages (no reloads); leaving the page with
-unsaved edits asks first. After a save, **Undo** (banner) can put the last save back.
+One page to make a draft product or edit an existing one, in the same steps, with every text next to its translations so the content
+manager never changes page to translate and nothing is missed. **The app never makes a product active**: it saves the product as it
+is (a new one as a DRAFT) and shows an **Open in Shopify** link and a **Preview** link (`onlineStorePreviewUrl`) at the top; activating is done in Shopify.
 
-**Metafield tabs** show only the rows chosen this session in "Choose metafields" (grouped by namespace, searchable, name +
-`namespace.key` + type; removing a row only hides it). Chosen rows can be saved as named **sets**. Type-aware inputs and checks:
-text, multi-line, rich text (round-trip only), integer, decimal, dimension/weight/volume (unit), boolean, date, date-time,
-colour, URL, JSON, rating, money, lists (add, remove, up/down), choice lists (from the definition's choices), references
-(Shopify resource picker). Read-only types say why (file, metaobject, mixed, page/article/customer/company references,
-some lists, rich text that cannot round-trip). Translations are offered only for text, multi-line text and URL, and only
-for a metafield that exists.
+**Top of the page:** a **Create / Edit** toggle.
+- *Create*: one box (title) and **Create draft product**. This is a write, so it is reviewed, ticked, password-protected (`createEngine` through `RunFlow`),
+  vendor "Hardman Design". It then opens step 1. Below: **Continue where I left off** (draft products that carry `draft_state`).
+- *Edit*: the product picker (search by title, handle or SKU; pins), then the same steps.
+- The **step strip** is always visible and every step opens at any time, in both parts. Each step shows how many unsaved edits it holds.
+- **Save and next** (footer): with changes waiting it shows the review, asks for the password, saves, then moves on; with none it just moves on.
+  A sticky **Changes** bar counts edits across all steps ("Review all changes" saves everything at once).
 
-**Create product** (steps: Basics, SEO, Metafields, Variants, Type, Tags, Prices): step 1 makes a real **DRAFT** product
-(`productCreate`, status DRAFT) and saves `draft_state`. Later steps use the normal tabs; "Save my place and continue" is a
-normal reviewed save that also moves `draft_state` to the next step. **Continue where I left off** lists draft products that
-carry `draft_state`. The product becomes ACTIVE only on "Finish and make active" (review + confirmation + password); that
-save also deletes `draft_state`. Variants step: options are created once (`productOptionsCreate`, variantStrategy CREATE)
-for a product that still has only the default variant.
+**The 11 steps** (`lib/editor/productSteps.ts`):
+
+| # | Step | What it holds | Translated |
+|---|---|---|---|
+| 1 | Product info | title, description (rich text), product type; Vendor (default Hardman Design); PDP template (read from the live theme); In stock / Made to order; (more: category, tags, status) | title, description, type |
+| 2 | Variants | up to 3 options, values, drag (or arrows) to set the order shown on the product page; names in every language | option and value names |
+| 3 | Inventory & prices | one tile per variant titled "option1 / option2 / option3": SKU, CAP, sale price (read only), tracked, locations and quantities | no |
+| 4 | Variant details | sub-tabs **Sizes & dimensions** and **Swatches & visibility** (variant metafields; copy first variant to all) | no |
+| 5 | Product options | sub-tabs **Options & customisation** and **Related & recommended** | text values |
+| 6 | Content | tag line, wood type, material, dimension section, other text metafields | yes, beside each text |
+| 7 | Lead times | delivery / production metafields (not "Build and Delivery time"); stock delivery shown for stock products | no |
+| 8 | SEO | SEO title and description with translations; URL handle (no translation) | title, description |
+| 9 | Images & files | image, video and document (PDF) metafields, with the file picker | never |
+| 10 | Publishing | sales channels and market catalogues | no |
+| 11 | Review | one tab per language: main language on the left, that language on the right; **Review changes and save** | read only |
+
+**Rules decided on the way (change them if wrong):**
+- **CAP = compare-at price.** You type the CAP; the price copies it (the sale price is read only). A sale that is already running (price below CAP) is left alone, with a note.
+- **Stock vs made to order** (step 1 and again on step 3): made to order = inventory not tracked, each variant at "Hardman Möbel Ltd. | London"
+  (found by name; if absent you choose) with no quantity; stock = tracked, quantity 1 per variant. Switching changes every variant and each can still be edited.
+  Only a **draft made here** is stocked automatically; an existing product is never changed on its own.
+- **Options** are saved by their own reviewed run (`lib/editor/optionsPlan.ts`, `optionsEngine`): create (or update), read back ids, order, translations, read back. Removing an option or a value is **not** offered (it deletes variants; do that in Shopify). When a product with only the default variant gets options, unsaved edits on the default variant are dropped (the review says so).
+- **Translations of a metafield that has no value yet** are held and attached after the value is saved in the same run (`lib/editor/deferred.ts`). If the value is empty the translation fails with a clear message.
+- **Metafield screens** are filled by matching the store's definitions by NAME to each screen (`lib/editor/curated.ts`; "Build and Delivery time" never). A definition the groups do not claim goes under **Add another metafield** (or is shown when it already holds a value). Variant metafields are read only for the keys shown.
+- **Value inputs** match the type: text, multi-line, rich text, numbers, dimension/weight/volume, boolean, date, colour, URL, JSON, rating, money, lists, choices, product / variant / collection references (Shopify picker), **metaobject entries** and **files** (own picker: search, thumbnails, "Load more"). Uploading a new file is NOT included: pick files already in Shopify > Content > Files.
+- No automatic translation. "Copy the source into empty languages" is still a confirmed helper.
+
+## Edit product (before 2026-11-02, kept for reference)
+
+The earlier version had tabs (Basic data, SEO, Product metafields, Variant metafields, Type and category, Inventory, Tags, Prices) and a 7-step Create
+wizard. Its pieces are reused: `TranslatableField`, `CategorySection`, `TagsTab`, `MetafieldRow`, `ValueEditor` and the shared review.
+`draft_state` of drafts made then is mapped to the nearest new step (`normalizeStep`).
 
 ## Bulk edit
 
@@ -108,12 +131,13 @@ productCreate, productOptionsCreate, app metafields), `read_products`, `read_tra
 (buildChanges, undoChanges), `doc`, `load`, `read`, `apply` (order: product fields → handle → variants → metafields → stock →
 translations; a failed step halts the rest for that product), `run` (editorEngine, 3-lane pool, read-back), `settings`
 (app metafields), `create`, `locales`, `bulk`, `bulkLoad`, `gql`, `pool`, `canon`, `fake` (fake Shopify for tests).
-`app/views/`: `edit.tsx`, `bulk.tsx`, `edit-state.ts`, `bulk-state.ts`, `editor-state.ts`. `app/components/editor/`: tabs, value editor,
-metafield chooser, review, changes bar, undo bar, create wizard, bulk table / columns / paste.
+`app/lib/editor/` also has (Product Edits): `productSteps` (the 11 steps), `curated` (metafield definitions by screen), `optionsPlan` (options plan + engine + drag helpers), `inventoryPlan` (stock mode, default location, CAP), `reviewRows` (language review), `deferred` (translations waiting for a value), `refs` (metaobject and file pickers' data), `templates` (PDP templates).
+`app/views/`: `edit.tsx` (Product Edits), `bulk.tsx`, `edit-state.ts`, `bulk-state.ts`, `editor-state.ts`. `app/components/editor/`: `steps/` (StepStrip, StepFooter, InfoStep, VariantsStep, InventoryStep, CuratedStep, SeoStep, PublishingStep, ReviewStep, CreateStart, StockKindToggle), value editor,
+reference dialog, metafield chooser, review, changes bar, undo bar, bulk table / columns / paste.
 
 ## Tests
 
-- 478 unit tests across 39 files (all of the app). Editor logic is tested against `FakeShopify`, which can refuse an
+- 782 unit tests across 58 files (all of the app; 2026-11-02). Each Product Edits step is also drawn on the server (`components/editor/steps/render.test.tsx`) to catch screens that throw; this is not a click-through. Editor logic is tested against `FakeShopify`, which can refuse an
   operation or say "ok" and change nothing (read-back must catch it): plan/apply order and halting, run + read-back, create
   flow, settings parse/serialize, type parsing/validation per metafield type, rich text round trip, bulk columns, cell
   parsing, filters, sort, TSV paste, undo.
@@ -130,13 +154,13 @@ metafield chooser, review, changes bar, undo bar, create wizard, bulk table / co
 3. Product metafields: choose one text metafield, edit, save, read back. Then an integer and a boolean.
 4. Change a handle with the redirect box ticked; check the old URL redirects.
 5. Inventory: change one quantity on a test product (see the Inventory notes in CLAUDE.md).
-6. Create product: make a draft, save two steps, reload, "Continue where I left off", finish. Check `draft_state` is gone.
+6. Product Edits > Create: make a draft (title only), then Save and next through Product info and Variants (two options, one translation), Inventory, one metafield step. Reload, "Continue where I left off". Open the Preview link. Check the product is still a draft. Do this on a throw-away product first.
 7. **Bulk edit**: change 2 tags on 2 products; use the first-product trial. Then Undo.
 8. Bulk paste of 10 rows with one bad handle; check the plan message and the failures list.
 
 ## Calls not yet seen on the real store (unverified)
 
-`productOptionsCreate` with `variantStrategy: CREATE`; `taxonomy.categories` fields (`id name fullName isLeaf`);
+`productOptionsCreate` with `variantStrategy: CREATE` (and on a product that already has options); `productOptionUpdate` (`variantStrategy: MANAGE`), `productOptionsReorder`; translations of options and option values (resource types ProductOption / ProductOptionValue); `inventoryActivate` / `inventoryDeactivate` and whether new variants are stocked at a default location on their own; `publishablePublish` / `publishableUnpublish` on a DRAFT product and reading a draft's publications; the theme template read (`files(filenames: ["templates/product.*"])`); `files()` and `metaobjects(type:)` pickers and what they return without scope `read_files`; `onlineStorePreviewUrl` for a draft; `taxonomy.categories` fields (`id name fullName isLeaf`);
 `inventorySetQuantities` with `changeFromQuantity`; `productUpdate` `redirectNewHandle`; `shopLocales` (needs `read_locales`);
 metafield translations (text, multi-line, URL only are offered); `$app` metafield on a product and on the installation;
 `shopify.resourcePicker` for reference rows; `collections` / `collection.products` reads; `translationsRegister` /
@@ -148,8 +172,9 @@ metafield translations (text, multi-line, URL only are offered); `$app` metafiel
 - Bulk price columns apply to single-variant products only (multi-variant products show "Several variants").
 - Bulk metafield columns are editable only for single inline types; lists, references and rich text are shown only.
 - Bulk (product table) has no metafield translations; Variants mode translates variant metafields (see above).
-- Create product: variants step builds options only for a product that still has the default variant; up to 3 options
-  and 100 variants.
+- Variants step: up to 3 options and 100 variants (Shopify allows 2,048); options and values can be added, renamed and reordered, not removed.
+- Metafield translations are offered for single text, multi-line text and URL values (not lists, rich text, files or references).
+- Files can be picked from Shopify > Content > Files but not uploaded here.
 - Category: leaf categories only. Description is edited in the visual editor (HTML view for the code); see "Description editor".
 - A product saved by someone else after you opened it: the recheck before writing stops the run and says which field changed.
 - The Undo record is stored in Shopify only if it is under 1.5M characters.

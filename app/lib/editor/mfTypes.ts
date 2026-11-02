@@ -27,6 +27,7 @@ export type InputKind =
   | "ref-variant"
   | "ref-collection"
   | "ref-metaobject"
+  | "ref-file"
   | "unsupported";
 
 export const DIMENSION_UNITS = ["mm", "cm", "m", "in", "ft", "yd"];
@@ -83,6 +84,8 @@ export function inputKindOf(type: string): InputKind {
       return "ref-collection";
     case "metaobject_reference":
       return "ref-metaobject";
+    case "file_reference":
+      return "ref-file";
     default:
       return "unsupported";
   }
@@ -354,7 +357,8 @@ export function buildElements(type: string, draft: Draft): BuildResult {
     case "ref-product":
     case "ref-variant":
     case "ref-collection":
-    case "ref-metaobject": {
+    case "ref-metaobject":
+    case "ref-file": {
       if (draft.refs.length === 0) return fail(list ? "Pick at least one item." : "Pick an item.");
       if (!list && draft.refs.length > 1) return fail("Pick only one item.");
       return { elements: draft.refs.map((r) => r.id) };
@@ -546,6 +550,7 @@ export function formatElement(kind: InputKind, el: unknown, labels: Record<strin
     case "ref-variant":
     case "ref-collection":
     case "ref-metaobject":
+    case "ref-file":
       return labels[String(el)] ?? shortGid(String(el));
     default:
       return typeof el === "string" ? el : typeof el === "number" ? String(el) : JSON.stringify(el);
@@ -604,6 +609,7 @@ export function draftFromValue(type: string, raw: string | null, labels: Record<
     case "ref-variant":
     case "ref-collection":
     case "ref-metaobject":
+    case "ref-file":
       return { ...draft, refs: elements.map((el) => ({ id: String(el), label: labels[String(el)] ?? shortGid(String(el)) })) };
     default:
       return { ...draft, text: elements.map((el) => (typeof el === "string" ? el : String(el))).join("\n") };

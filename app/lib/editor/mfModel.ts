@@ -28,8 +28,6 @@ import type { Value } from "./model";
 export type Support = { editable: true } | { editable: false; reason: string };
 
 const READONLY_REASON: Record<string, string> = {
-  file_reference: "Files and images are media. This app does not handle media, so the value is shown read-only.",
-  metaobject_reference: "Metaobject entries are not edited in this app. Change this one in Shopify.",
   mixed_reference: "Metaobject entries are not edited in this app. Change this one in Shopify.",
   page_reference: "Pages are not picked in this app. Change this one in Shopify.",
   article_reference: "Articles are not picked in this app. Change this one in Shopify.",
@@ -42,7 +40,7 @@ export function supportOf(type: string): Support {
   const base = baseType(type);
   if (READONLY_REASON[base]) return { editable: false, reason: READONLY_REASON[base] };
   const kind = inputKindOf(type);
-  if (kind === "unsupported" || kind === "ref-metaobject") return { editable: false, reason: "This type is not edited in this app. Change it in Shopify." };
+  if (kind === "unsupported") return { editable: false, reason: "This type is not edited in this app. Change it in Shopify." };
   if (isListType(type) && (kind === "boolean" || kind === "json" || kind === "richtext" || kind === "multiline")) {
     return { editable: false, reason: "This type is not edited in this app. Change it in Shopify." };
   }

@@ -62,7 +62,7 @@ export function createEngine(input: {
       const base = { productId: "", title: normText(p.title), handle: "", before: "—", after: normText(p.title), added: [] as string[], removed: [] as string[] };
       try {
         const made = await createDraftProduct(input.gql, p);
-        const state: DraftState = { step: "seo", product: input.rows.product, variant: input.rows.variant, savedAt: new Date().toISOString() };
+        const state: DraftState = { step: "info", product: input.rows.product, variant: input.rows.variant, savedAt: new Date().toISOString() };
         let note = "";
         try {
           await saveDraftState(input.gql, made.id, state);

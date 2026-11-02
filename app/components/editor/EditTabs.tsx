@@ -28,11 +28,11 @@ export type TabProps = {
   knownTags?: string[];
 };
 
-const productTarget = (productId: string, field: ProductField): Target => ({ kind: "product", productId, field });
-const variantTarget = (productId: string, variantId: string, field: VariantField): Target => ({ kind: "variant", productId, variantId, field });
+export const productTarget = (productId: string, field: ProductField): Target => ({ kind: "product", productId, field });
+export const variantTarget = (productId: string, variantId: string, field: VariantField): Target => ({ kind: "variant", productId, variantId, field });
 
 /** A product field with its translations in every store language. */
-function TranslatableField({ edit, shared, doc, field, multiline, rows, hint, label, rich }: TabProps & { field: ProductField; multiline?: boolean; rows?: number; hint?: string; label?: string; rich?: boolean }) {
+export function TranslatableField({ edit, shared, doc, field, multiline, rows, hint, label, rich }: TabProps & { field: ProductField; multiline?: boolean; rows?: number; hint?: string; label?: string; rich?: boolean }) {
   const key = PRODUCT_TRANSLATION_KEY[field];
   const target = productTarget(doc.id, field);
   const source = edit.effectiveValue(target) ?? "";
@@ -128,6 +128,15 @@ export function SeoTab(props: TabProps) {
 }
 
 export function TypeTab(props: TabProps) {
+  return (
+    <s-stack gap="base">
+      <TranslatableField {...props} field="productType" label="Product type" hint="Your own label for the kind of product, for example Dining table." />
+      <CategorySection {...props} />
+    </s-stack>
+  );
+}
+
+export function CategorySection(props: TabProps) {
   const { edit, doc } = props;
   const target = productTarget(doc.id, "category");
   const current = edit.effectiveValue(target);
@@ -156,7 +165,6 @@ export function TypeTab(props: TabProps) {
 
   return (
     <s-stack gap="base">
-      <TranslatableField {...props} field="productType" label="Product type" hint="Your own label for the kind of product, for example Dining table." />
       <s-section heading="Category">
         <s-stack gap="base">
           <s-text>{current ? categoryLabel(current) : "No category"}</s-text>

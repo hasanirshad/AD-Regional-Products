@@ -6,6 +6,7 @@
 
 import { tagsToValue } from "./canon";
 import { chunks, gqlString, type Gql } from "./gql";
+import { resolveDeferred, resolvedId } from "./deferred";
 import { loadTranslations } from "./load";
 import { targetKey, type ProductField, type Target, type Value, type VariantField } from "./model";
 import { mfKey } from "./doc";
@@ -23,6 +24,7 @@ type RawProductFields = {
   tags: string[];
   seo: { title: string | null; description: string | null } | null;
   category: { id: string } | null;
+  templateSuffix?: string | null;
 };
 
 export const PRODUCT_FIELDS_QUERY = `#graphql
@@ -39,6 +41,7 @@ export const PRODUCT_FIELDS_QUERY = `#graphql
         tags
         seo { title description }
         category { id name }
+        templateSuffix
       }
     }
   }`;
@@ -65,6 +68,8 @@ export function productFieldValue(p: RawProductFields, field: ProductField): Val
       return p.category?.id ?? null;
     case "tags":
       return tagsToValue(p.tags);
+    case "templateSuffix":
+      return p.templateSuffix || null;
   }
 }
 
@@ -115,7 +120,7 @@ export const STOCK_QUERY = `#graphql
         id
         inventoryItem {
           inventoryLevels(first: 10) {
-            nodes { location { id } quantities(names: ["available"]) { name quantity } }
+            nodes { id location { id } quantities(names: ["available"]) { name quantity } }
           }
         }
       }
@@ -226,14 +231,60 @@ export async function readValues(gql: Gql, targets: Target[], onProgress?: (done
   // translations
   const translations = targets.filter((t): t is Extract<Target, { kind: "translation" }> => t.kind === "translation");
   if (translations.length > 0) {
+    // A deferred translation belongs to a metafield that may not exist yet: look its id up now. No metafield = no translation.
+    const lookup = await resolveDeferred(gql, translations.flatMap((t) => (t.defer ? [t.defer] : [])));
+    const idOf = (t: Extract<Target, { kind: "translation" }>): string | null => (t.defer ? (resolvedId(lookup, t.defer) ?? null) : t.resourceId);
     const slots = [...new Set(translations.map((t) => t.slot))];
-    const resources = [...new Set(translations.map((t) => t.resourceId))];
+    const resources = [...new Set(translations.flatMap((t) => (idOf(t) ? [idOf(t)!] : [])))];
     const res = await loadTranslations(gql, resources, slots);
     for (const t of translations) {
-      const r = res[t.resourceId];
+      if (t.defer && resolvedId(lookup, t.defer) === undefined) continue; // the owner is gone
+      const id = idOf(t);
+      if (!id) {
+        out.set(targetKey(t), null);
+        continue;
+      }
+      const r = res[id];
       if (r) out.set(targetKey(t), r.values[t.field]?.[t.slot]?.value ?? null);
     }
   }
   tick(translations.length);
+
+  // publications
+  const publish = targets.filter((t): t is Extract<Target, { kind: "publish" }> => t.kind === "publish");
+  if (publish.length > 0) {
+    const ids = [...new Set(publish.map((t) => t.productId))];
+    const states = await readPublicationIds(gql, ids);
+    for (const t of publish) {
+      const have = states.get(t.productId);
+      if (have) out.set(targetKey(t), String(have.has(t.publicationId)));
+    }
+  }
+  tick(publish.length);
+  return out;
+}
+
+// ---------------------------------------------------------------- publications
+
+export const PUBLICATIONS_QUERY = `#graphql
+  query ReadPublicationIds($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Product {
+        id
+        resourcePublicationsV2(first: 50) { nodes { publication { id } } }
+      }
+    }
+  }`;
+
+/** product id -> the ids of every publication it is published to (sales channels and market catalogues). */
+export async function readPublicationIds(gql: Gql, productIds: string[]): Promise<Map<string, Set<string>>> {
+  const out = new Map<string, Set<string>>();
+  for (const group of chunks([...new Set(productIds)], 25)) {
+    const data = await gql<{ nodes: ({ id?: string; resourcePublicationsV2?: { nodes: { publication?: { id: string } | null }[] } } | null)[] }>(PUBLICATIONS_QUERY, { ids: group });
+    for (const n of data.nodes) {
+      if (!n?.id) continue;
+      out.set(n.id, new Set((n.resourcePublicationsV2?.nodes ?? []).flatMap((x) => (x.publication?.id ? [x.publication.id] : []))));
+    }
+  }
   return out;
 }

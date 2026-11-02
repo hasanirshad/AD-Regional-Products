@@ -10,14 +10,15 @@ describe("supportOf", () => {
       expect(supportOf(t), t).toEqual({ editable: true });
     }
   });
-  it("shows media and other references read-only, with the reason", () => {
-    const file = supportOf("file_reference");
-    expect(file.editable).toBe(false);
-    expect(file.editable ? "" : file.reason).toContain("media");
-    expect(supportOf("list.file_reference").editable).toBe(false);
-    expect(supportOf("metaobject_reference").editable).toBe(false);
-    expect(supportOf("list.metaobject_reference").editable).toBe(false);
-    expect(supportOf("customer_reference").editable).toBe(false);
+  it("edits files and metaobject entries with the pickers", () => {
+    for (const t of ["file_reference", "list.file_reference", "metaobject_reference", "list.metaobject_reference"]) expect(supportOf(t), t).toEqual({ editable: true });
+  });
+  it("shows other references read-only, with the reason", () => {
+    const customer = supportOf("customer_reference");
+    expect(customer.editable).toBe(false);
+    expect(customer.editable ? "" : customer.reason).toContain("Shopify");
+    expect(supportOf("mixed_reference").editable).toBe(false);
+    expect(supportOf("page_reference").editable).toBe(false);
     expect(supportOf("something_new").editable).toBe(false);
   });
 });
@@ -173,7 +174,8 @@ describe("draftsFromStored", () => {
 
 describe("valueEditable", () => {
   it("is false for read-only types and for rich text with formatting the editor cannot keep", () => {
-    expect(valueEditable("file_reference", "gid://shopify/MediaImage/1")).toBe(false);
+    expect(valueEditable("customer_reference", "gid://shopify/Customer/1")).toBe(false);
+    expect(valueEditable("file_reference", "gid://shopify/MediaImage/1")).toBe(true);
     expect(valueEditable("single_line_text_field", "x")).toBe(true);
     const odd = JSON.stringify({ type: "root", children: [{ type: "code", children: [] }] });
     expect(valueEditable("rich_text_field", odd)).toBe(false);

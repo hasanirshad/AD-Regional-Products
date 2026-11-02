@@ -91,7 +91,7 @@ app/
     channels.tsx                 Channels & catalogues: filter + select products, enable/disable sales channels, add/remove catalogues (INCLUDES the Global market)
     links.tsx                    Storefront links (READ ONLY): per product, a link in each market's primary domain; theme picker (live / preview id); US gets stay_us=1; CSV export
     check.tsx                    Product check: one product, markets / countries / catalogues / profiles / variants
-    edit.tsx / bulk.tsx          Edit product (tabs, create wizard) and Bulk edit (table, paste). State: edit-state, bulk-state, editor-state. See "Product editor"
+    edit.tsx / bulk.tsx          Product Edits (create/edit toggle, 11 steps) and Bulk edit (table, paste). State: edit-state, bulk-state, editor-state. See "Product editor"
     settings.tsx                 Block settings: a tab per block + Market adaptations, review + password save, reset, preview. See "Block settings"
   components/
     RunFlow.tsx                  THE apply flow, generic over a RunEngine (confirm, password, recheck, first-product trial, read-back, CSV). Move, Unpublish fix and Channels use it
@@ -295,6 +295,19 @@ with `shopify.query`. Full note (scopes, constants, API gaps, deploy, test plan)
 - New scope: `read_translations` (needs `npm run deploy`, then approval when someone opens the app). New devDependencies: `preact`, `@shopify/ui-extensions`, `preact-render-to-string`.
 - Verified: typecheck, 47 new tests against a fake Shopify, `shopify app build` of all seven, a Chromium smoke run with a stub `shopify` global.
   NOT verified: any query against the real store.
+
+## Product Edits (rebuilt 2026-11-02; was "Edit product")
+
+- Route `/edit`, nav "Product Edits". Create/Edit toggle at the top; the 11 steps (Product info, Variants, Inventory & prices, Variant details, Product options,
+  Content, Lead times, SEO, Images & files, Publishing, Review) are always in a strip, in both parts. "Save and next" = review, password, save, move on.
+  **The app never activates a product**: it saves as it is (new = DRAFT) and shows the Open in Shopify and Preview links. Full note: `docs/PRODUCT-EDITOR.md`.
+- Code: `lib/editor/productSteps.ts` (steps), `curated.ts` (metafield definitions by screen, matched by name), `optionsPlan.ts` (options engine, own RunFlow),
+  `inventoryPlan.ts` (stock vs made to order, default location "Hardman Möbel Ltd. | London", CAP = compare-at; price follows it), `reviewRows.ts`, `deferred.ts`
+  (translations of a metafield waiting for its value), `refs.ts` (metaobject and file pickers), `templates.ts`. UI in `components/editor/steps/`. State in `views/edit-state.ts`.
+- New scope `read_files` (file picker): run `npm run deploy`. Files cannot be uploaded here, only picked. Options/values cannot be removed here.
+- Unverified on the real store: option update / reorder / create on products that already have options, option translations, inventory activate/deactivate,
+  publishing a draft, the theme template read, `files()` / `metaobjects()` shapes, `onlineStorePreviewUrl`. The step screens were smoke-rendered on the server
+  (`steps/render.test.tsx`) but NOT clicked through in a browser (the Polaris script is not reachable from the cloud).
 
 ## Product editor: Edit product and Bulk edit (added 2026-10-28)
 

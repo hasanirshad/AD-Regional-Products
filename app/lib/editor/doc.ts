@@ -6,7 +6,7 @@ import type { Target, Value } from "./model";
 
 export type MetafieldDoc = { id: string; value: string; type: string; digest: string | null };
 
-export type StockLevelDoc = { locationId: string; quantity: number };
+export type StockLevelDoc = { locationId: string; quantity: number; /** The inventory level id (needed to remove a location). */ id?: string };
 
 export type VariantDoc = {
   id: string;
@@ -32,6 +32,16 @@ export type TranslationRes = {
   values: Record<string, Record<string, { value: string; outdated: boolean }>>;
 };
 
+export type OptionDoc = {
+  /** Shopify's option id (absent only in old test data). */
+  id: string;
+  name: string;
+  position: number;
+  values: string[];
+  /** The ids of the values, in the same order as `values`. */
+  valueIds: string[];
+};
+
 export type ProductDoc = {
   id: string;
   title: string;
@@ -44,7 +54,13 @@ export type ProductDoc = {
   productType: string;
   category: { id: string; name: string } | null;
   tags: string[];
-  options: { name: string; values: string[] }[];
+  options: OptionDoc[];
+  /** The product's theme template suffix ("" = the default template). */
+  templateSuffix: string;
+  /** Shopify's preview link for the product (works for a draft, for people signed in to the admin). */
+  previewUrl: string | null;
+  /** Ids of every publication (sales channel or market catalogue) the product is published to. */
+  publicationIds: string[];
   variants: VariantDoc[];
   /** True when the product has more variants than were read. */
   variantsTruncated: boolean;
@@ -111,6 +127,8 @@ export function baseOf(doc: ProductDoc, t: Target): Value {
           return doc.category?.id ?? null;
         case "tags":
           return tagsToValue(doc.tags);
+        case "templateSuffix":
+          return doc.templateSuffix || null;
       }
       return null;
     case "variant": {
@@ -142,6 +160,8 @@ export function baseOf(doc: ProductDoc, t: Target): Value {
       const level = v?.levels.find((l) => l.locationId === t.locationId);
       return level ? String(level.quantity) : null;
     }
+    case "publish":
+      return String(doc.publicationIds.includes(t.publicationId));
     case "translation":
       return doc.translations[t.resourceId]?.values[t.field]?.[t.slot]?.value ?? null;
   }

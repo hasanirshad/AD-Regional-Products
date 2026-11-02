@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { applyBundle, productInput, splitChanges, variantInputs } from "./apply";
 import { tagsToValue } from "./canon";
 import { baseOf, type ProductDoc } from "./doc";
-import { fakeProduct, fakeVariant, FakeShopify, LOC_A } from "./fake";
+import { fakeProduct, fakeVariant, FakeShopify, LOC_A, LOC_B } from "./fake";
+import { deferredResourceId } from "./deferred";
 import { loadProductDoc } from "./load";
+import { readValues } from "./read";
 import { targetKey, type Bundle, type Change, type Target, type Value } from "./model";
 
 const P = "gid://shopify/Product/1";
@@ -140,7 +142,7 @@ describe("applyBundle", () => {
     expect(out.get(v.id)).toEqual({ status: "failed", message: "Shopify did not answer" });
   });
 
-  it("refuses a stock change at a location the variant is not stocked at", async () => {
+  it("refuses a stock change at a location that does not exist", async () => {
     const { shop } = setup();
     const doc = await loadProductDoc(shop.gql, P, []);
     const s = change(doc, { kind: "stock", productId: P, variantId: V, itemId: `item-${V}`, locationId: "gid://shopify/Location/9" }, "3");
@@ -213,5 +215,154 @@ describe("translations", () => {
     const out = await applyBundle(shop.gql, bundle([change(doc, t, "Chêne")]));
     expect(out.get(targetKey(t))!.status).toBe("done");
     expect(shop.translation(mfId, "value", "fr")).toBe("Chêne");
+  });
+});
+
+const stockT = (locationId: string): Target => ({ kind: "stock", productId: P, variantId: V, itemId: `item-${V}`, locationId });
+
+describe("stock: stocking and un-stocking a location", () => {
+  it("stocks a new location, then sets its quantity from 0", async () => {
+    const { shop } = setup();
+    const doc = await loadProductDoc(shop.gql, P, []);
+    const c = change(doc, stockT(LOC_B), "4");
+    expect(c.before).toBeNull();
+    const out = await applyBundle(shop.gql, bundle([c]));
+    expect(out.get(c.id)).toMatchObject({ status: "done" });
+    expect(shop.products.get(P)!.variants[0]!.levels[LOC_B]).toBe(4);
+    const calls = shop.calls.map((x) => x.op).filter((o) => o.startsWith("EditorStock"));
+    expect(calls).toEqual(["EditorStockActivate", "EditorStockSet"]);
+    expect(shop.calls.find((x) => x.op === "EditorStockSet")!.variables.input).toMatchObject({ quantities: [{ changeFromQuantity: 0, quantity: 4 }] });
+  });
+
+  it("stocks a location at 0 without a quantity call", async () => {
+    const { shop } = setup();
+    const doc = await loadProductDoc(shop.gql, P, []);
+    const c = change(doc, stockT(LOC_B), "0");
+    const out = await applyBundle(shop.gql, bundle([c]));
+    expect(out.get(c.id)).toMatchObject({ status: "done" });
+    expect(shop.products.get(P)!.variants[0]!.levels[LOC_B]).toBe(0);
+    expect(shop.count("EditorStockSet")).toBe(0);
+  });
+
+  it("takes a variant out of a location, after the new one is stocked", async () => {
+    const { shop } = setup();
+    const doc = await loadProductDoc(shop.gql, P, []);
+    const move = [change(doc, stockT(LOC_A), null), change(doc, stockT(LOC_B), "5")];
+    const out = await applyBundle(shop.gql, bundle(move));
+    expect([...out.values()].every((o) => o.status === "done")).toBe(true);
+    expect(shop.products.get(P)!.variants[0]!.levels).toEqual({ [LOC_B]: 5 });
+    const order = shop.calls.map((x) => x.op).filter((o) => o.startsWith("EditorStock"));
+    expect(order.indexOf("EditorStockActivate")).toBeLessThan(order.indexOf("EditorStockDeactivate"));
+  });
+
+  it("reports Shopify's refusal to remove the only location", async () => {
+    const { shop } = setup();
+    const doc = await loadProductDoc(shop.gql, P, []);
+    const c = change(doc, stockT(LOC_A), null);
+    const out = await applyBundle(shop.gql, bundle([c]));
+    expect(out.get(c.id)!.status).toBe("failed");
+    expect(shop.products.get(P)!.variants[0]!.levels[LOC_A]).toBe(5);
+  });
+
+  it("an already removed location is not an error", async () => {
+    const { shop } = setup();
+    const doc = await loadProductDoc(shop.gql, P, []);
+    const c = change(doc, stockT(LOC_A), null);
+    shop.products.get(P)!.variants[0]!.levels = { [LOC_B]: 1 }; // gone in the meantime
+    const out = await applyBundle(shop.gql, bundle([c]));
+    expect(out.get(c.id)).toMatchObject({ status: "done" });
+    expect(shop.count("EditorStockDeactivate")).toBe(0);
+  });
+});
+
+describe("PDP template", () => {
+  it("sets and clears the template suffix", async () => {
+    const { shop } = setup();
+    const doc = await loadProductDoc(shop.gql, P, []);
+    const t: Target = { kind: "product", productId: P, field: "templateSuffix" };
+    const c = change(doc, t, "made-to-order");
+    expect(productInput(P, splitChanges([c]).product)).toEqual({ id: P, templateSuffix: "made-to-order" });
+    await applyBundle(shop.gql, bundle([c]));
+    expect(shop.products.get(P)!.templateSuffix).toBe("made-to-order");
+    expect((await readValues(shop.gql, [t])).get(targetKey(t))).toBe("made-to-order");
+    const back = change(await loadProductDoc(shop.gql, P, []), t, "");
+    expect(productInput(P, splitChanges([back]).product)).toEqual({ id: P, templateSuffix: null });
+    await applyBundle(shop.gql, bundle([back]));
+    expect(shop.products.get(P)!.templateSuffix).toBe("");
+  });
+});
+
+describe("publishing", () => {
+  const pub = (id: string): Target => ({ kind: "publish", productId: P, publicationId: id });
+  const PUB_A = "gid://shopify/Publication/1";
+  const PUB_B = "gid://shopify/Publication/2";
+
+  it("publishes to one catalogue and unpublishes from another, reading both back", async () => {
+    const { shop } = setup();
+    shop.products.get(P)!.publicationIds = [PUB_B];
+    const doc = await loadProductDoc(shop.gql, P, []);
+    expect(doc.publicationIds).toEqual([PUB_B]);
+    const on = change(doc, pub(PUB_A), "true");
+    const off = change(doc, pub(PUB_B), "false");
+    expect(on.before).toBe("false");
+    expect(off.before).toBe("true");
+    const out = await applyBundle(shop.gql, bundle([on, off]));
+    expect(out.get(on.id)).toMatchObject({ status: "done" });
+    expect(out.get(off.id)).toMatchObject({ status: "done" });
+    expect(shop.products.get(P)!.publicationIds).toEqual([PUB_A]);
+    const read = await readValues(shop.gql, [pub(PUB_A), pub(PUB_B)]);
+    expect(read.get(targetKey(pub(PUB_A)))).toBe("true");
+    expect(read.get(targetKey(pub(PUB_B)))).toBe("false");
+  });
+
+  it("sends all publications of a kind in one call", async () => {
+    const { shop } = setup();
+    const doc = await loadProductDoc(shop.gql, P, []);
+    await applyBundle(shop.gql, bundle([change(doc, pub(PUB_A), "true"), change(doc, pub(PUB_B), "true")]));
+    expect(shop.count("EditorPublish")).toBe(1);
+    expect(shop.products.get(P)!.publicationIds.sort()).toEqual([PUB_A, PUB_B]);
+  });
+
+  it("a refusal fails the change and does not crash the run", async () => {
+    const { shop } = setup();
+    shop.failOn.set("EditorPublish", "The product is not ready");
+    const doc = await loadProductDoc(shop.gql, P, []);
+    const c = change(doc, pub(PUB_A), "true");
+    const out = await applyBundle(shop.gql, bundle([c]));
+    expect(out.get(c.id)).toMatchObject({ status: "failed" });
+    expect(out.get(c.id)!.status === "failed" && out.get(c.id)!.message).toContain("not ready");
+  });
+});
+
+describe("a metafield translation typed before the value exists", () => {
+  const defer = { ownerId: P, namespace: "custom", key: "tagline" };
+  const t = (slot: string): Target => ({ kind: "translation", productId: P, resourceId: deferredResourceId(defer), resource: "metafield", field: "value", slot, mfType: "single_line_text_field", defer });
+  const valueT: Target = { kind: "metafield", productId: P, ownerId: P, ownerKind: "PRODUCT", namespace: "custom", key: "tagline", type: "single_line_text_field" };
+
+  it("saves the value first, then finds its id and registers the translation", async () => {
+    const { shop } = setup();
+    const doc = await loadProductDoc(shop.gql, P, ["fr"]);
+    const value = change(doc, valueT, "Built to last");
+    const tr = { ...change(doc, t("fr"), "Fait pour durer"), before: null };
+    const out = await applyBundle(shop.gql, bundle([tr, value]));
+    expect(out.get(value.id)).toMatchObject({ status: "done" });
+    expect(out.get(tr.id)).toMatchObject({ status: "done" });
+    const id = shop.products.get(P)!.metafields["custom.tagline"]!.id;
+    expect(shop.translation(id, "value", "fr")).toBe("Fait pour durer");
+  });
+
+  it("explains when the value was never saved", async () => {
+    const { shop } = setup();
+    const doc = await loadProductDoc(shop.gql, P, ["fr"]);
+    const tr = { ...change(doc, t("fr"), "Fait pour durer"), before: null };
+    const out = await applyBundle(shop.gql, bundle([tr]));
+    expect(out.get(tr.id)).toMatchObject({ status: "failed" });
+    expect(JSON.stringify(out.get(tr.id))).toContain("no value yet");
+  });
+
+  it("reads a deferred translation as empty until the metafield exists", async () => {
+    const { shop } = setup();
+    const before = await readValues(shop.gql, [t("fr")]);
+    expect(before.get(targetKey(t("fr")))).toBeNull();
   });
 });

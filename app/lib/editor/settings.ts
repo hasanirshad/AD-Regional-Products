@@ -12,6 +12,7 @@
 // Uninstalling the app deletes the installation metafields (the products and their drafts stay).
 // Reading is free. Saving is a mutation, so it asks for the password like every other write.
 
+import { normalizeStep, STEPS, type StepId } from "./productSteps";
 import { parseSettings, SETTINGS_KEY as BLOCKS_KEY, type ParseResult } from "../../../extensions/shared/settings";
 import { formatUserErrors, type Gql, type UserError } from "./gql";
 import type { Change, Target, Value } from "./model";
@@ -47,16 +48,9 @@ export type UndoRecord = {
   items: UndoItem[];
 };
 
-export type CreateStep = "basics" | "seo" | "metafields" | "variants" | "type" | "tags" | "prices";
-export const CREATE_STEPS: { id: CreateStep; label: string }[] = [
-  { id: "basics", label: "Basics" },
-  { id: "seo", label: "SEO" },
-  { id: "metafields", label: "Metafields" },
-  { id: "variants", label: "Variants" },
-  { id: "type", label: "Type" },
-  { id: "tags", label: "Tags" },
-  { id: "prices", label: "Prices" },
-];
+/** The steps of Product Edits (see productSteps.ts). Drafts saved with the old step names are mapped to the new ones. */
+export type CreateStep = StepId;
+export const CREATE_STEPS: { id: CreateStep; label: string }[] = STEPS.map((s) => ({ id: s.id, label: s.label }));
 
 export type DraftState = {
   step: CreateStep;
@@ -128,7 +122,7 @@ export function serializeUndo(record: UndoRecord): string | null {
 export function parseDraftState(raw: string | null | undefined): DraftState | null {
   const data = parseJson(raw) as Record<string, unknown> | null;
   if (!data) return null;
-  const step = CREATE_STEPS.find((s) => s.id === data.step)?.id;
+  const step = normalizeStep(data.step);
   if (!step) return null;
   return { step, product: strings(data.product), variant: strings(data.variant), savedAt: typeof data.savedAt === "string" ? data.savedAt : "" };
 }

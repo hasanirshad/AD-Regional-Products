@@ -20,7 +20,7 @@ describe("loadProductDoc", () => {
     const doc = await loadProductDoc(shop.gql, P, ["fr", "de"]);
     expect(doc.title).toBe("Table");
     expect(doc.variants).toHaveLength(2);
-    expect(doc.variants[0]!.levels).toEqual([{ locationId: "L1", quantity: 3 }, { locationId: "L2", quantity: 0 }]);
+    expect(doc.variants[0]!.levels).toEqual([{ id: "level:item-v1:L1", locationId: "L1", quantity: 3 }, { id: "level:item-v1:L2", locationId: "L2", quantity: 0 }]);
     expect(variantTitle(doc.variants[0]!)).toBe("180 cm");
     expect(doc.metafields["custom.material"]!.value).toBe("Oak");
     expect(doc.translations[P]!.values.title!.fr!.value).toBe("Table FR");
