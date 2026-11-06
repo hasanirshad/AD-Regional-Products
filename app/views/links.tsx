@@ -43,6 +43,8 @@ export default function Links() {
   const [drafts, setDrafts] = useState<Record<string, string>>(() => readOverrides());
   const [draftErrors, setDraftErrors] = useState<Record<string, string>>({});
   const [saveNote, setSaveNote] = useState("");
+  // Show only the ticked products (the filters are ignored, so a selection made under other filters is still all there).
+  const [onlySelected, setOnlySelected] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,9 +99,10 @@ export default function Links() {
 
   const options = useMemo(() => filterOptions(products.rows), [products.rows]);
   const filtered = useMemo(() => applyFilters(products.rows, filters, {}), [products.rows, filters]);
-  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const shown = useMemo(() => (onlySelected ? products.rows.filter((p) => selected.has(p.id)) : filtered), [onlySelected, products.rows, selected, filtered]);
+  const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
   const safePage = Math.min(page, pages - 1);
-  const pageRows = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+  const pageRows = shown.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
   const pageAllSelected = pageRows.length > 0 && pageRows.every((p) => selected.has(p.id));
   const chips = activeChips(filters, { catalogs: options.catalogs, profiles: [] });
   const set = (patch: Partial<Filters>) => setFilters({ ...filters, ...patch });
@@ -295,9 +298,18 @@ export default function Links() {
 
               <s-stack direction="inline" gap="base" alignItems="center">
                 <s-text color="subdued">
-                  {filtered.length} of {products.rows.length} products · {selected.size} selected
+                  {onlySelected ? `Showing the ${shown.length} selected product${shown.length === 1 ? "" : "s"} (filters are ignored)` : `${filtered.length} of ${products.rows.length} products`} · {selected.size} selected
                 </s-text>
-                {filtered.length > 0 && selected.size < filtered.length ? (
+                <s-checkbox
+                  label="Show only selected"
+                  checked={onlySelected || undefined}
+                  disabled={selected.size === 0 && !onlySelected ? true : undefined}
+                  ref={onChecked((on) => {
+                    setOnlySelected(on);
+                    setPage(0);
+                  })}
+                />
+                {!onlySelected && filtered.length > 0 && selected.size < filtered.length ? (
                   <s-button variant="tertiary" onClick={() => setSelected(() => new Set(filtered.map((p) => p.id)))}>
                     {`Select all ${filtered.length} matching`}
                   </s-button>
@@ -313,17 +325,19 @@ export default function Links() {
                 <s-button variant="primary" disabled={chosen.length === 0 || !rootsReady || undefined} onClick={() => exportRows(chosen)}>
                   {`Export ${chosen.length} selected (CSV)`}
                 </s-button>
-                <s-button disabled={filtered.length === 0 || !rootsReady || undefined} onClick={() => exportRows(filtered)}>
-                  {`Export all ${filtered.length} matching`}
-                </s-button>
+                {!onlySelected ? (
+                  <s-button disabled={filtered.length === 0 || !rootsReady || undefined} onClick={() => exportRows(filtered)}>
+                    {`Export all ${filtered.length} matching`}
+                  </s-button>
+                ) : null}
                 <s-text color="subdued">One row per product and market: title, market, store link, admin link.</s-text>
               </s-stack>
 
-              {filtered.length === 0 ? (
+              {shown.length === 0 ? (
                 <s-stack gap="small-100">
-                  <s-paragraph>No products match these filters.</s-paragraph>
+                  <s-paragraph>{onlySelected ? "No products are selected." : "No products match these filters."}</s-paragraph>
                   <div>
-                    <s-button onClick={() => setFilters(NO_FILTERS)}>Clear filters</s-button>
+                    {onlySelected ? <s-button onClick={() => setOnlySelected(false)}>Show all products</s-button> : <s-button onClick={() => setFilters(NO_FILTERS)}>Clear filters</s-button>}
                   </div>
                 </s-stack>
               ) : (
@@ -391,7 +405,7 @@ export default function Links() {
                 </s-table>
               )}
 
-              {filtered.length > PAGE_SIZE ? (
+              {shown.length > PAGE_SIZE ? (
                 <s-stack direction="inline" gap="base" alignItems="center">
                   <s-button disabled={safePage === 0 || undefined} onClick={() => setPage(safePage - 1)}>
                     Previous
