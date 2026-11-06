@@ -20,7 +20,7 @@ Checkout is blocked by the shipping profile (a product only ships to the countri
 
 ## Where things are
 
-- Pure logic with tests: `lib/overview.ts` (states, issues, filters), `lib/move.ts` (what a move changes), `lib/filter.ts`, `lib/parse.ts`, `lib/guard.ts`.
+- Pure logic with tests: `lib/overview.ts` (states, issues, filters), `lib/move.ts` (what a move changes), `lib/filters/` (search and filters), `lib/parse.ts`, `lib/guard.ts`.
 - Shopify calls: `lib/shopify-data.ts` (reads), `lib/applyMove.ts` (writes), `lib/admin.ts` (client with retry and the write lock).
 
 ## Run it

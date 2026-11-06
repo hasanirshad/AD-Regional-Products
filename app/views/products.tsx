@@ -1,23 +1,21 @@
-import { useMemo, useState } from "react";
-import { FilterBar } from "../components/FilterBar";
+import { memo, useCallback, useMemo, useState } from "react";
 import { Loading } from "../components/Loading";
 import { MoveReview } from "../components/MoveReview";
 import { PageBody } from "../components/PageBody";
 import { ScopeBanner } from "../components/ScopeBanner";
 import { SelectField } from "../components/SelectField";
+import { SearchFilterBar } from "../components/filters/SearchFilterBar";
+import { SelectionLine } from "../components/filters/SelectionLine";
 import { onChecked } from "../lib/dom";
-import {
-  activeChips,
-  ANY,
-  applyFilters,
-  filterOptions,
-  NO_FILTERS,
-  NONE,
-} from "../lib/filter";
+import { NONE, type PageSection, type SectionId } from "../lib/filters/filterModel";
+import { matchingSelected, selectMatching } from "../lib/filters/selection";
 import { GENERAL as GENERAL_KEY, makeShippers } from "../lib/overview";
-import type { Filters, ProductRow } from "../lib/types";
+import type { ProductRow } from "../lib/types";
+import { useListFilters } from "./filter-state";
 import { useStartProducts } from "./products-state";
 import { useAppState } from "./state";
+
+const SECTIONS: SectionId[] = ["status", "vendor", "productType", "collection", "tag", "tagNot", "catalog", "market", "variants", "page"];
 
 const PAGE_SIZE = 40;
 
@@ -29,7 +27,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function Products() {
-  const { shop, profiles, markets, products, ui, refresh } = useAppState();
+  const { shop, profiles, markets, products, ui, collections, refresh } = useAppState();
   useStartProducts(products);
 
   const { filters, setFilters, selected, setSelected, page, setPage } = ui;
@@ -37,11 +35,19 @@ export default function Products() {
   const [reviewing, setReviewing] = useState(false);
   const shippers = useMemo(() => makeShippers(profiles), [profiles]);
 
-  const options = useMemo(() => filterOptions(products.rows), [products.rows]);
-  const filtered = useMemo(
-    () => applyFilters(products.rows, filters, products.membership),
-    [products.rows, filters, products.membership],
+  // Every shipping profile besides General can hold products.
+  const profileChoices = shippers.filter((s) => s.kind === "profile");
+  const pageSections = useMemo<PageSection[]>(
+    () => [{ key: "profile", label: "Shipping profile", single: true, options: [{ value: NONE, label: "General (no profile)" }, ...profileChoices.map((s) => ({ value: s.key, label: s.name }))] }],
+    [profileChoices],
   );
+  const context = useMemo(
+    () => ({ pageMatch: (p: ProductRow, page: Record<string, string[]>) => (page.profile ?? []).length === 0 || page.profile!.some((v) => (v === NONE ? !products.membership[p.id] : products.membership[p.id] === v)) }),
+    [products.membership],
+  );
+  const extra = useMemo(() => ({ pageSections }), [pageSections]);
+  const found = useListFilters({ rows: products.rows, ui, markets, collections, context, options: extra, sections: SECTIONS });
+  const filtered = found.list;
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pages - 1);
@@ -54,22 +60,17 @@ export default function Products() {
     if (list && list.length > 1) return `Split: ${list.map((x) => profileName(x.key) ?? "?").join(" + ")}`;
     return profileName(products.membership[productId]);
   };
-  // Every shipping profile besides General can hold products.
-  const profileChoices = shippers.filter((s) => s.kind === "profile");
 
-  const chips = activeChips(filters, {
-    catalogs: options.catalogs,
-    profiles: profileChoices.map((s) => ({ id: s.key, name: s.name })),
-  });
-  const set = (patch: Partial<Filters>) => setFilters({ ...filters, ...patch });
-
-  const toggleOne = (id: string, on: boolean) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(id);
-      else next.delete(id);
-      return next;
-    });
+  const toggleOne = useCallback(
+    (id: string, on: boolean) =>
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (on) next.add(id);
+        else next.delete(id);
+        return next;
+      }),
+    [setSelected],
+  );
   const togglePage = (on: boolean) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -148,82 +149,16 @@ export default function Products() {
           <ScopeBanner scope={products.scope} count={products.rows.length} onChange={products.setScope} />
           <s-section heading="Products">
             <s-stack gap="base">
-              <FilterBar
-                search={filters.search}
-                onSearch={(search) => set({ search })}
-                placeholder="Search by title, handle, vendor, type or tag"
-                activeCount={chips.length}
-                chips={chips}
-                onRemoveChip={(key) => set({ [key]: "" } as Partial<Filters>)}
-                onClear={() => setFilters(NO_FILTERS)}
-              >
-                <s-heading>Product</s-heading>
-                <SelectField
-                  label="Status"
-                  value={filters.status}
-                  onChange={(status) => set({ status })}
-                  options={[
-                    { value: "", label: "Any status" },
-                    ...options.statuses.map((s) => ({ value: s, label: STATUS_LABEL[s] ?? s })),
-                  ]}
-                />
-                <SelectField
-                  label="Vendor"
-                  value={filters.vendor}
-                  onChange={(vendor) => set({ vendor })}
-                  options={[{ value: "", label: "Any vendor" }, ...options.vendors.map((v) => ({ value: v, label: v }))]}
-                />
-                <SelectField
-                  label="Product type"
-                  value={filters.productType}
-                  onChange={(productType) => set({ productType })}
-                  options={[{ value: "", label: "Any type" }, ...options.types.map((t) => ({ value: t, label: t }))]}
-                />
-                <SelectField
-                  label="Tag"
-                  value={filters.tag}
-                  onChange={(tag) => set({ tag })}
-                  options={[{ value: "", label: "Any tag" }, ...options.tags.map((t) => ({ value: t, label: t }))]}
-                />
-                <s-heading>Where it is sold</s-heading>
-                <SelectField
-                  label="Catalogue"
-                  value={filters.catalog}
-                  onChange={(catalog) => set({ catalog })}
-                  options={[
-                    { value: "", label: "Any" },
-                    { value: NONE, label: "Not in any catalogue" },
-                    { value: ANY, label: "In any catalogue" },
-                    ...options.catalogs.map((c) => ({ value: c.id, label: c.title })),
-                  ]}
-                />
-                <SelectField
-                  label="Profile"
-                  value={filters.profile}
-                  onChange={(profile) => set({ profile })}
-                  options={[
-                    { value: "", label: "Any" },
-                    { value: NONE, label: "General (no profile)" },
-                    ...profileChoices.map((s) => ({ value: s.key, label: s.name })),
-                  ]}
-                />
-              </FilterBar>
+              <SearchFilterBar filters={filters} onChange={setFilters} sections={SECTIONS} options={found.options} pageTitle="Availability" notes={found.notes} onOpen={found.onOpen} />
+              <SelectionLine count={selected.size} onlySelected={found.onlySelected} onOnlySelected={ui.setOnlySelected} onClear={ui.clearSelection} />
 
               <s-stack direction="inline" gap="base" alignItems="center">
                 <s-text color="subdued">
                   {filtered.length} of {products.rows.length} products · {selected.size} selected
                 </s-text>
-                {filtered.length > 0 && selected.size < filtered.length ? (
-                  <s-button
-                    variant="tertiary"
-                    onClick={() => setSelected(() => new Set(filtered.map((p) => p.id)))}
-                  >
-                    {`Select all ${filtered.length} matching`}
-                  </s-button>
-                ) : null}
-                {selected.size > 0 ? (
-                  <s-button variant="tertiary" onClick={() => setSelected(() => new Set())}>
-                    Clear selection
+                {!found.onlySelected && found.matching.length > 0 && matchingSelected(selected, found.matching) < found.matching.length ? (
+                  <s-button variant="tertiary" onClick={() => setSelected((prev) => selectMatching(prev, found.matching))}>
+                    {`Select all ${found.matching.length} matching`}
                   </s-button>
                 ) : null}
                 <s-button variant="tertiary" onClick={products.reload}>
@@ -257,9 +192,9 @@ export default function Products() {
 
               {filtered.length === 0 ? (
                 <s-stack gap="small-100">
-                  <s-paragraph>No products match these filters.</s-paragraph>
+                  <s-paragraph>{found.waiting > 0 ? "No products to show yet." : "No products match these filters."}</s-paragraph>
                   <div>
-                    <s-button onClick={() => setFilters(NO_FILTERS)}>Clear filters</s-button>
+                    <s-button onClick={ui.clearFilters}>Clear filters</s-button>
                   </div>
                 </s-stack>
               ) : (
@@ -285,7 +220,7 @@ export default function Products() {
                         key={p.id}
                         p={p}
                         checked={selected.has(p.id)}
-                        onCheck={(on) => toggleOne(p.id, on)}
+                        onToggle={toggleOne}
                         current={profileLabel(p.id)}
                       />
                     ))}
@@ -314,15 +249,15 @@ export default function Products() {
   );
 }
 
-function ProductTableRow({
+const ProductTableRow = memo(function ProductTableRow({
   p,
   checked,
-  onCheck,
+  onToggle,
   current,
 }: {
   p: ProductRow;
   checked: boolean;
-  onCheck: (on: boolean) => void;
+  onToggle: (id: string, on: boolean) => void;
   current: string | undefined;
 }) {
   const sub = [p.vendor, p.productType].filter(Boolean).join(" · ");
@@ -333,7 +268,7 @@ function ProductTableRow({
           label={`Select ${p.title}`}
           labelAccessibilityVisibility="exclusive"
           checked={checked || undefined}
-          ref={onChecked(onCheck)}
+          ref={onChecked((on) => onToggle(p.id, on))}
         />
       </s-table-cell>
       <s-table-cell>
@@ -371,4 +306,4 @@ function ProductTableRow({
       </s-table-cell>
     </s-table-row>
   );
-}
+});

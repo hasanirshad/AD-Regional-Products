@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  NO_BULK_FILTERS,
-  activeFilterCount,
-  applyListFilters,
-  applyValueFilters,
   cellText,
   filterColumns,
   listText,
   metafieldColumn,
+  metafieldEmptyOf,
+  translationStateOf,
   normalizePriceText,
   parseCell,
   parseTsv,
@@ -20,8 +18,9 @@ import {
   targetOf,
   toTsv,
   translationColumn,
-  type BulkFilters,
 } from "./bulk";
+import { applyListFilters, applyValueFilters } from "../filters/applyFilters";
+import { NO_FILTERS, type FilterState } from "../filters/filterModel";
 import { loadCells, loadCollectionProducts, loadCollections, newCache, targetsFor } from "./bulkLoad";
 import { tagsToValue } from "./canon";
 import { fakeProduct, fakeVariant, FakeShopify } from "./fake";
@@ -122,58 +121,82 @@ describe("filters", () => {
     row(2, { vendor: "B", tags: ["new"], status: "DRAFT" }),
     row(3, { vendor: "A", productType: "Chair" }),
   ];
-  const f = (x: Partial<BulkFilters>): BulkFilters => ({ ...NO_BULK_FILTERS, ...x });
+  const f = (x: Partial<FilterState>): FilterState => ({ ...NO_FILTERS, ...x });
+  const ids = (list: { rows: ProductRow[] }) => list.rows.map((r) => r.numericId);
 
   it("combines list filters with AND", () => {
-    expect(applyListFilters(rows, f({ vendor: "A" }), null).map((r) => r.numericId)).toEqual(["1", "3"]);
-    expect(applyListFilters(rows, f({ vendor: "A", productType: "Chair" }), null).map((r) => r.numericId)).toEqual(["3"]);
-    expect(applyListFilters(rows, f({ tag: "new" }), null).map((r) => r.numericId)).toEqual(["2"]);
-    expect(applyListFilters(rows, f({ search: "PRODUCT-3" }), null).map((r) => r.numericId)).toEqual(["3"]);
+    expect(ids(applyListFilters(rows, f({ vendor: ["A"] })))).toEqual(["1", "3"]);
+    expect(ids(applyListFilters(rows, f({ vendor: ["A"], productType: ["Chair"] })))).toEqual(["3"]);
+    expect(ids(applyListFilters(rows, f({ tag: ["new"] })))).toEqual(["2"]);
+    expect(ids(applyListFilters(rows, f({ search: "PRODUCT-3" })))).toEqual(["3"]);
   });
   it("filters by market catalogue, in or not in", () => {
-    expect(applyListFilters(rows, f({ catalog: "c1" }), null).map((r) => r.numericId)).toEqual(["1"]);
-    expect(applyListFilters(rows, f({ catalog: "c1", catalogMode: "not" }), null).map((r) => r.numericId)).toEqual(["2", "3"]);
+    expect(ids(applyListFilters(rows, f({ catalogIn: ["c1"] })))).toEqual(["1"]);
+    expect(ids(applyListFilters(rows, f({ catalogNot: ["c1"] })))).toEqual(["2", "3"]);
   });
-  it("filters by collection", () => {
-    expect(applyListFilters(rows, f({ collection: "x" }), new Set([rows[1]!.id])).map((r) => r.numericId)).toEqual(["2"]);
+  it("filters by collection, and waits while it is still being read", () => {
+    expect(ids(applyListFilters(rows, f({ collection: ["x"] }), { collections: { x: new Set([rows[1]!.id]) } }))).toEqual(["2"]);
+    const reading = applyListFilters(rows, f({ collection: ["x"] }), { collections: {} });
+    expect(reading.rows).toEqual([]);
+    expect(reading.waiting).toBe(3);
   });
-  it("counts the active filters", () => {
-    expect(activeFilterCount(f({ vendor: "A", tag: "x", missingSlot: "fr" }))).toBe(3);
-    expect(activeFilterCount(f({ search: "x" }))).toBe(0);
+  it("tag does not have works in Bulk edit too", () => {
+    expect(ids(applyListFilters(rows, f({ tagNot: ["sale"] })))).toEqual(["2", "3"]);
   });
+  it("searches the text of loaded columns as well", () => {
+    const cols = { searchColumns: (p: ProductRow) => (p.numericId === "2" ? ["Beech wood"] : []) };
+    expect(ids(applyListFilters(rows, f({ search: "beech" }), cols))).toEqual(["2"]);
+  });
+
+  const known = new Map<string, string | null>();
+  const put = (p: ProductRow, field: string, key: string, src: string | null, tr: string | null) => {
+    known.set(targetKey({ kind: "product", productId: p.id, field: field as never }), src);
+    known.set(targetKey({ kind: "translation", productId: p.id, resourceId: p.id, resource: "product", field: key, slot: "fr" }), tr);
+  };
+  const fill = (p: ProductRow, missing: boolean) => {
+    put(p, "title", "title", p.title, "T");
+    put(p, "descriptionHtml", "body_html", "<p>x</p>", missing ? null : "<p>y</p>");
+    put(p, "seoTitle", "meta_title", null, null);
+    put(p, "seoDescription", "meta_description", null, null);
+  };
+  const valueOf = (_id: string, t: Parameters<typeof targetKey>[0]) => known.get(targetKey(t));
 
   it("finds products with a missing translation, and counts the ones not read yet", () => {
-    const known = new Map<string, string | null>();
-    const put = (p: ProductRow, field: string, key: string, src: string | null, tr: string | null) => {
-      known.set(targetKey({ kind: "product", productId: p.id, field: field as never }), src);
-      known.set(targetKey({ kind: "translation", productId: p.id, resourceId: p.id, resource: "product", field: key, slot: "fr" }), tr);
-    };
-    const fill = (p: ProductRow, missing: boolean) => {
-      put(p, "title", "title", p.title, "T");
-      put(p, "descriptionHtml", "body_html", "<p>x</p>", missing ? null : "<p>y</p>");
-      put(p, "seoTitle", "meta_title", null, null);
-      put(p, "seoDescription", "meta_description", null, null);
-    };
+    known.clear();
     fill(rows[0]!, true);
     fill(rows[1]!, false);
-    const out = applyValueFilters(rows, f({ missingSlot: "fr" }), [], (id, t) => known.get(targetKey(t)));
-    expect(out.rows.map((r) => r.numericId)).toEqual(["1"]);
+    const out = applyValueFilters(rows, f({ translationMode: "missing", translationSlots: ["fr"] }), { translation: (p, slot) => translationStateOf(p, slot, valueOf) });
+    expect(ids(out)).toEqual(["1"]);
     expect(out.waiting).toBe(1);
+    const complete = applyValueFilters(rows, f({ translationMode: "complete", translationSlots: ["fr"] }), { translation: (p, slot) => translationStateOf(p, slot, valueOf) });
+    expect(ids(complete)).toEqual(["2"]);
   });
 
-  it("finds products with an empty metafield", () => {
+  it("finds products with an empty or a filled metafield", () => {
     const d = { id: "d", ownerKind: "PRODUCT" as const, namespace: "custom", key: "material", name: "Material", description: "", type: "single_line_text_field", validations: [] };
     const values: Record<string, string | null> = { [rows[0]!.id]: "Oak", [rows[1]!.id]: null };
     const lookup = (id: string) => values[id];
-    const out = applyValueFilters(rows, f({ emptyMetafield: "custom.material" }), [d], lookup);
-    expect(out.rows.map((r) => r.numericId)).toEqual(["2"]);
-    expect(out.waiting).toBe(1);
+    const ctx = { metafieldEmpty: (p: ProductRow) => metafieldEmptyOf(p, d, lookup) };
+    const empty = applyValueFilters(rows, f({ metafield: "custom.material", metafieldState: "empty" }), ctx);
+    expect(ids(empty)).toEqual(["2"]);
+    expect(empty.waiting).toBe(1);
+    expect(ids(applyValueFilters(rows, f({ metafield: "custom.material", metafieldState: "filled" }), ctx))).toEqual(["1"]);
+    expect(metafieldEmptyOf(rows[0]!, undefined, lookup)).toBeUndefined();
   });
 
-  it("needs the source and translation columns to judge", () => {
-    const cols = filterColumns(f({ missingSlot: "fr" }), []);
+  it("does nothing for the value stage when no value filter is on", () => {
+    const out = applyValueFilters(rows, f({ vendor: ["A"] }), {});
+    expect(out.rows).toHaveLength(3);
+    expect(out.waiting).toBe(0);
+  });
+
+  it("needs the source and translation columns to judge, for the languages named or all", () => {
+    const cols = filterColumns(f({ translationMode: "missing", translationSlots: ["fr"] }), [], ["fr", "de"]);
     expect(cols.map((c) => c.id)).toContain("t:fr:descriptionHtml");
     expect(cols.map((c) => c.id)).toContain("p:descriptionHtml");
+    expect(cols.map((c) => c.id)).not.toContain("t:de:descriptionHtml");
+    const every = filterColumns(f({ translationMode: "missing" }), [], ["fr", "de"]);
+    expect(every.map((c) => c.id)).toContain("t:de:descriptionHtml");
   });
 });
 

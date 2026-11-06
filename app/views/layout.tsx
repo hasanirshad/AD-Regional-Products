@@ -2,14 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import type { BlockSettings } from "../../extensions/shared/settings";
 import { Outlet } from "react-router";
 import { Gate } from "../components/Gate";
-import { NO_INV_FILTERS, type InvFilters } from "../lib/inventoryFilter";
 import { useBulkState } from "./bulk-state";
 import { useVariantBulk } from "./bulk-variants-state";
 import { useEditState } from "./edit-state";
+import { useCollectionData } from "./filter-state";
 import { useEditorShared } from "./editor-state";
 import { useProductsLoad, useProductsUi, type Shared } from "./products-state";
 import { MARKET_DRIVEN_MESSAGE, readShippingMode } from "../lib/shippingMode";
 import { useLoadAppState } from "./state";
+
+const NO_MARKETS: never[] = [];
 
 // Layout: navigation, shared state, loading and error shell.
 // Overview is the home route, then Products.
@@ -22,7 +24,9 @@ export default function Layout() {
   const linksUi = useProductsUi();
   const checkUi = useProductsUi();
   const inventoryUi = useProductsUi();
-  const [invFilters, setInvFilters] = useState<InvFilters>(NO_INV_FILTERS);
+  const overviewUi = useProductsUi();
+  const pickerUi = useProductsUi();
+  const collections = useCollectionData();
   const [blockDraft, setBlockDraft] = useState<BlockSettings | null>(null);
   const [marketDriven, setMarketDriven] = useState(false);
   const ready = loaded.status === "ready";
@@ -37,12 +41,12 @@ export default function Layout() {
   const marketIds = useMemo(() => (app ? app.markets.map((m) => m.id) : null), [app]);
   const editor = useEditorShared(marketIds);
   const edit = useEditState(editor);
-  const bulk = useBulkState(editor, products);
+  const bulk = useBulkState(editor, products, collections, app?.markets ?? NO_MARKETS);
   const variantBulk = useVariantBulk(editor);
 
   const shared = useMemo<Shared | null>(
-    () => (app ? { ...app, products, ui, channelsUi, linksUi, checkUi, inventoryUi, invFilters: { value: invFilters, set: setInvFilters }, blockDraft: { value: blockDraft, set: setBlockDraft }, editor, edit, bulk, variantBulk } : null),
-    [app, products, ui, channelsUi, linksUi, checkUi, inventoryUi, invFilters, blockDraft, editor, edit, bulk, variantBulk],
+    () => (app ? { ...app, products, ui, channelsUi, linksUi, checkUi, inventoryUi, overviewUi, pickerUi, collections, blockDraft: { value: blockDraft, set: setBlockDraft }, editor, edit, bulk, variantBulk } : null),
+    [app, products, ui, channelsUi, linksUi, checkUi, inventoryUi, overviewUi, pickerUi, collections, blockDraft, editor, edit, bulk, variantBulk],
   );
 
   return (

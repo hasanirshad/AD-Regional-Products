@@ -6,6 +6,7 @@
 // page uses (edits.ts), so the review, the checks and the apply code are shared.
 
 import { dedupeTags, normText, parseNumber, tagsFromValue, tagsToValue } from "./canon";
+import type { FilterState } from "../filters/filterModel";
 import type { Definition } from "./load";
 import { checkRules, type Validation } from "./mfRules";
 import { formatValue, inlineToStored, isInlineType, storedToInline, typeLabel } from "./mfTypes";
@@ -203,72 +204,18 @@ export function parseCell(col: Column, text: string): ParsedCell {
 
 // ---------------------------------------------------------------- filters
 
-export type BulkFilters = {
-  search: string;
-  status: string;
-  vendor: string;
-  productType: string;
-  tag: string;
-  /** A collection id, or "". */
-  collection: string;
-  /** A catalogue id (a market's catalogue), or "". */
-  catalog: string;
-  /** With a catalogue chosen: show the products that are in it ("in") or that are not ("not"). */
-  catalogMode: "in" | "not";
-  /** A language slot: show products with a missing translation in it. Judged on loaded products. */
-  missingSlot: string;
-  /** "namespace.key": show products where this product metafield is empty. Judged on loaded products. */
-  emptyMetafield: string;
-};
+// The search and filters are the standard ones (lib/filters). What is specific to Bulk edit: which columns a translation or
+// metafield filter needs read, and how a product's values are judged.
 
-export const NO_BULK_FILTERS: BulkFilters = {
-  search: "",
-  status: "",
-  vendor: "",
-  productType: "",
-  tag: "",
-  collection: "",
-  catalog: "",
-  catalogMode: "in",
-  missingSlot: "",
-  emptyMetafield: "",
-};
-
-export const activeFilterCount = (f: BulkFilters): number =>
-  [f.status, f.vendor, f.productType, f.tag, f.collection, f.catalog, f.missingSlot, f.emptyMetafield].filter(Boolean).length;
-
-/** Filters that look at the product list only. Free, and applied to every product. */
-export function applyListFilters(rows: ProductRow[], f: BulkFilters, collectionIds: Set<string> | null): ProductRow[] {
-  const q = f.search.trim().toLowerCase();
-  return rows.filter((p) => {
-    if (q) {
-      const hay = [p.title, p.handle, p.vendor, p.productType, ...p.tags].join("\n").toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    if (f.status && p.status !== f.status) return false;
-    if (f.vendor && p.vendor !== f.vendor) return false;
-    if (f.productType && p.productType !== f.productType) return false;
-    if (f.tag && !p.tags.includes(f.tag)) return false;
-    if (f.collection && collectionIds && !collectionIds.has(p.id)) return false;
-    if (f.catalog) {
-      const inIt = p.catalogs.some((c) => c.id === f.catalog);
-      if (f.catalogMode === "in" ? !inIt : inIt) return false;
-    }
-    return true;
-  });
-}
-
-/** True when a filter needs values read from Shopify before it can judge a product. */
-export const needsValues = (f: BulkFilters): boolean => Boolean(f.missingSlot || f.emptyMetafield);
-
-/** The columns a filter needs read, besides the ones chosen for the table. */
-export function filterColumns(f: BulkFilters, defs: Definition[]): Column[] {
+/** The columns a filter needs read, besides the ones chosen for the table. `slotKeys`: every language, for a filter that names none. */
+export function filterColumns(f: FilterState, defs: Definition[], slotKeys: string[]): Column[] {
   const out: Column[] = [];
-  if (f.missingSlot) {
-    for (const field of MISSING_FIELDS) out.push(productColumn(field), translationColumn(field, f.missingSlot, f.missingSlot));
+  if (f.translationMode) {
+    const slots = f.translationSlots.length ? f.translationSlots : slotKeys;
+    for (const slot of slots) for (const field of MISSING_FIELDS) out.push(productColumn(field), translationColumn(field, slot, slot));
   }
-  if (f.emptyMetafield) {
-    const def = defs.find((d) => `${d.namespace}.${d.key}` === f.emptyMetafield);
+  if (f.metafield && f.metafieldState) {
+    const def = defs.find((d) => `${d.namespace}.${d.key}` === f.metafield);
     if (def) out.push(metafieldColumn(def));
   }
   return out;
@@ -276,41 +223,25 @@ export function filterColumns(f: BulkFilters, defs: Definition[]): Column[] {
 
 export type ValueLookup = (productId: string, target: Target) => Value | undefined;
 
-/**
- * The filters that need values. A product whose values are not read yet is not judged: it is counted in `waiting`.
- * `valueOf` returns undefined for "not read".
- */
-export function applyValueFilters(rows: ProductRow[], f: BulkFilters, defs: Definition[], valueOf: ValueLookup): { rows: ProductRow[]; waiting: number } {
-  if (!needsValues(f)) return { rows, waiting: 0 };
-  const def = f.emptyMetafield ? defs.find((d) => `${d.namespace}.${d.key}` === f.emptyMetafield) : undefined;
-  let waiting = 0;
-  const out: ProductRow[] = [];
-  for (const p of rows) {
-    let keep = true;
-    let known = true;
-    if (f.missingSlot) {
-      let missing = false;
-      for (const field of MISSING_FIELDS) {
-        const key = PRODUCT_TRANSLATION_KEY[field]!;
-        const source = valueOf(p.id, { kind: "product", productId: p.id, field });
-        const tr = valueOf(p.id, { kind: "translation", productId: p.id, resourceId: p.id, resource: "product", field: key, slot: f.missingSlot });
-        if (source === undefined || tr === undefined) {
-          known = false;
-          break;
-        }
-        if (normText(source) !== "" && normText(tr) === "") missing = true;
-      }
-      if (known && !missing) keep = false;
-    }
-    if (known && keep && f.emptyMetafield && def) {
-      const v = valueOf(p.id, { kind: "metafield", productId: p.id, ownerId: p.id, ownerKind: "PRODUCT", namespace: def.namespace, key: def.key, type: def.type });
-      if (v === undefined) known = false;
-      else if (v !== null && v !== "") keep = false;
-    }
-    if (!known) waiting++;
-    else if (keep) out.push(p);
+/** Is the product's translation into one language missing (a text with no translation) or complete? undefined = not read yet. */
+export function translationStateOf(p: ProductRow, slot: string, valueOf: ValueLookup): "missing" | "complete" | undefined {
+  let missing = false;
+  for (const field of MISSING_FIELDS) {
+    const key = PRODUCT_TRANSLATION_KEY[field]!;
+    const source = valueOf(p.id, { kind: "product", productId: p.id, field });
+    const tr = valueOf(p.id, { kind: "translation", productId: p.id, resourceId: p.id, resource: "product", field: key, slot });
+    if (source === undefined || tr === undefined) return undefined;
+    if (normText(source) !== "" && normText(tr) === "") missing = true;
   }
-  return { rows: out, waiting };
+  return missing ? "missing" : "complete";
+}
+
+/** Is the product metafield empty? undefined = not read yet (or the definition is unknown). */
+export function metafieldEmptyOf(p: ProductRow, def: Definition | undefined, valueOf: ValueLookup): boolean | undefined {
+  if (!def) return undefined;
+  const v = valueOf(p.id, { kind: "metafield", productId: p.id, ownerId: p.id, ownerKind: "PRODUCT", namespace: def.namespace, key: def.key, type: def.type });
+  if (v === undefined) return undefined;
+  return v === null || v === "";
 }
 
 // ---------------------------------------------------------------- sorting

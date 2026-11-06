@@ -144,6 +144,37 @@ export const NO_FOCUS: Focus = {
   inProfile: false,
 };
 
+/** The value of the Profile filter that means "in any shipping profile besides General". */
+export const IN_A_PROFILE = "__in_profile__";
+
+/**
+ * A tile or issue opens the product list with a Focus. The standard bar holds it: Active only is the Status box, a catalogue is
+ * Market catalogue; the rest sits in "This page only" (Show, Profile, Market, In that market).
+ */
+export function focusFilters(f: Focus): { status: string[]; catalogIn: string[]; page: Record<string, string[]> } {
+  const page: Record<string, string[]> = {};
+  if (f.show) page.show = [f.show];
+  if (f.profileKey) page.profile = [f.profileKey];
+  else if (f.inProfile) page.profile = [IN_A_PROFILE];
+  if (f.marketId) page.market = [f.marketId];
+  if (f.state) page.state = [f.state];
+  return { status: f.activeOnly ? ["ACTIVE"] : [], catalogIn: f.catalogId ? [f.catalogId] : [], page };
+}
+
+/** The "This page only" filters of the Overview product list, judged on one product line. */
+export function matchLinePage(l: ProductLine, page: Record<string, string[]>): boolean {
+  const profile = page.profile?.[0] ?? "";
+  const focus: Focus = {
+    ...NO_FOCUS,
+    show: (page.show?.[0] ?? "") as Focus["show"],
+    profileKey: profile === IN_A_PROFILE ? "" : profile,
+    inProfile: profile === IN_A_PROFILE,
+    marketId: page.market?.[0] ?? "",
+    state: (page.state?.[0] ?? "") as Focus["state"],
+  };
+  return matchFocus(l, focus);
+}
+
 export const focusOf = (patch: Partial<Focus>): Focus => ({ ...NO_FOCUS, ...patch });
 
 export function matchFocus(l: ProductLine, f: Focus): boolean {

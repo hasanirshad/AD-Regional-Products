@@ -1,21 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
-import { FilterBar } from "../components/FilterBar";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { SearchFilterBar } from "../components/filters/SearchFilterBar";
+import { SelectionLine } from "../components/filters/SelectionLine";
 import { Loading } from "../components/Loading";
 import { PageBody } from "../components/PageBody";
 import { ScopeBanner } from "../components/ScopeBanner";
 import { SelectField } from "../components/SelectField";
 import { normalizeBase, readOverrides, writeOverrides, type DomainOverrides } from "../lib/domains";
 import { onChecked, onInput } from "../lib/dom";
-import { activeChips, ANY, applyFilters, filterOptions, NO_FILTERS, NONE } from "../lib/filter";
+import type { SectionId } from "../lib/filters/filterModel";
+import { matchingSelected, selectMatching } from "../lib/filters/selection";
 import { buildLinks, isUsMarket, linksCsv, pickRoot, STAY_PARAM, themeLabel, type MarketRoot, type Theme, type WebPresence } from "../lib/links";
 import { sellingMarkets } from "../lib/overview";
 import { downloadCsv } from "../lib/report";
 import { loadMarketRoots, loadThemes } from "../lib/shopify-data";
-import type { Filters } from "../lib/types";
+import type { ProductRow } from "../lib/types";
+import { useListFilters } from "./filter-state";
 import { useStartProducts } from "./products-state";
 import { useAppState } from "./state";
 
 const PAGE_SIZE = 25;
+const SECTIONS: SectionId[] = ["status", "vendor", "productType", "collection", "tag", "tagNot", "catalog", "market", "variants"];
 const STATUS_LABEL: Record<string, string> = { ACTIVE: "Active", DRAFT: "Draft", ARCHIVED: "Archived" };
 const LIVE = "live";
 const OTHER = "other";
@@ -29,7 +33,7 @@ const SOURCE_TEXT = {
 
 // Read only. Nothing here changes the store, so there is no password.
 export default function Links() {
-  const { shop, markets, products, linksUi: ui } = useAppState();
+  const { shop, markets, products, linksUi: ui, collections } = useAppState();
   useStartProducts(products);
   const { filters, setFilters, selected, setSelected, page, setPage } = ui;
 
@@ -43,8 +47,6 @@ export default function Links() {
   const [drafts, setDrafts] = useState<Record<string, string>>(() => readOverrides());
   const [draftErrors, setDraftErrors] = useState<Record<string, string>>({});
   const [saveNote, setSaveNote] = useState("");
-  // Show only the ticked products (the filters are ignored, so a selection made under other filters is still all there).
-  const [onlySelected, setOnlySelected] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,15 +99,14 @@ export default function Links() {
   const themeId =
     themeChoice === LIVE ? "" : themeChoice === OTHER ? (manualOk ? manualId.trim() : "") : (themes?.find((t) => t.numericId === themeChoice)?.role === "MAIN" ? "" : themeChoice);
 
-  const options = useMemo(() => filterOptions(products.rows), [products.rows]);
-  const filtered = useMemo(() => applyFilters(products.rows, filters, {}), [products.rows, filters]);
-  const shown = useMemo(() => (onlySelected ? products.rows.filter((p) => selected.has(p.id)) : filtered), [onlySelected, products.rows, selected, filtered]);
+  const found = useListFilters({ rows: products.rows, ui, markets, collections, sections: SECTIONS });
+  const filtered = found.matching;
+  const onlySelected = found.onlySelected;
+  const shown = found.list;
   const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
   const safePage = Math.min(page, pages - 1);
   const pageRows = shown.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
   const pageAllSelected = pageRows.length > 0 && pageRows.every((p) => selected.has(p.id));
-  const chips = activeChips(filters, { catalogs: options.catalogs, profiles: [] });
-  const set = (patch: Partial<Filters>) => setFilters({ ...filters, ...patch });
 
   const linkRows = useMemo(
     () => buildLinks({ products: pageRows, markets: sellMarkets, roots: marketRoots, themeId, myshopifyDomain: shop.domain }),
@@ -119,13 +120,16 @@ export default function Links() {
     );
   const chosen = products.rows.filter((p) => selected.has(p.id));
 
-  const toggleOne = (id: string, on: boolean) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(id);
-      else next.delete(id);
-      return next;
-    });
+  const toggleOne = useCallback(
+    (id: string, on: boolean) =>
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (on) next.add(id);
+        else next.delete(id);
+        return next;
+      }),
+    [setSelected],
+  );
   const togglePage = (on: boolean) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -250,73 +254,14 @@ export default function Links() {
 
           <s-section heading="Products">
             <s-stack gap="base">
-              <FilterBar
-                search={filters.search}
-                onSearch={(search) => set({ search })}
-                placeholder="Search by title, handle, vendor, type or tag"
-                activeCount={chips.length}
-                chips={chips}
-                onRemoveChip={(key) => set({ [key]: "" } as Partial<Filters>)}
-                onClear={() => setFilters(NO_FILTERS)}
-              >
-                <SelectField
-                  label="Status"
-                  value={filters.status}
-                  onChange={(status) => set({ status })}
-                  options={[{ value: "", label: "Any status" }, ...options.statuses.map((s) => ({ value: s, label: STATUS_LABEL[s] ?? s }))]}
-                />
-                <SelectField
-                  label="Vendor"
-                  value={filters.vendor}
-                  onChange={(vendor) => set({ vendor })}
-                  options={[{ value: "", label: "Any vendor" }, ...options.vendors.map((v) => ({ value: v, label: v }))]}
-                />
-                <SelectField
-                  label="Product type"
-                  value={filters.productType}
-                  onChange={(productType) => set({ productType })}
-                  options={[{ value: "", label: "Any type" }, ...options.types.map((t) => ({ value: t, label: t }))]}
-                />
-                <SelectField
-                  label="Tag"
-                  value={filters.tag}
-                  onChange={(tag) => set({ tag })}
-                  options={[{ value: "", label: "Any tag" }, ...options.tags.map((t) => ({ value: t, label: t }))]}
-                />
-                <SelectField
-                  label="Catalogue"
-                  value={filters.catalog}
-                  onChange={(catalog) => set({ catalog })}
-                  options={[
-                    { value: "", label: "Any" },
-                    { value: NONE, label: "Not in any catalogue" },
-                    { value: ANY, label: "In any catalogue" },
-                    ...options.catalogs.map((c) => ({ value: c.id, label: c.title })),
-                  ]}
-                />
-              </FilterBar>
+              <SearchFilterBar filters={filters} onChange={setFilters} sections={SECTIONS} options={found.options} notes={found.notes} onOpen={found.onOpen} />
+              <SelectionLine count={selected.size} onlySelected={onlySelected} onOnlySelected={ui.setOnlySelected} onClear={ui.clearSelection} />
 
               <s-stack direction="inline" gap="base" alignItems="center">
-                <s-text color="subdued">
-                  {onlySelected ? `Showing the ${shown.length} selected product${shown.length === 1 ? "" : "s"} (filters are ignored)` : `${filtered.length} of ${products.rows.length} products`} · {selected.size} selected
-                </s-text>
-                <s-checkbox
-                  label="Show only selected"
-                  checked={onlySelected || undefined}
-                  disabled={selected.size === 0 && !onlySelected ? true : undefined}
-                  ref={onChecked((on) => {
-                    setOnlySelected(on);
-                    setPage(0);
-                  })}
-                />
-                {!onlySelected && filtered.length > 0 && selected.size < filtered.length ? (
-                  <s-button variant="tertiary" onClick={() => setSelected(() => new Set(filtered.map((p) => p.id)))}>
+                <s-text color="subdued">{onlySelected ? `${shown.length} of ${products.rows.length} products` : `${filtered.length} of ${products.rows.length} products`}</s-text>
+                {!onlySelected && filtered.length > 0 && matchingSelected(selected, filtered) < filtered.length ? (
+                  <s-button variant="tertiary" onClick={() => setSelected((prev) => selectMatching(prev, filtered))}>
                     {`Select all ${filtered.length} matching`}
-                  </s-button>
-                ) : null}
-                {selected.size > 0 ? (
-                  <s-button variant="tertiary" onClick={() => setSelected(() => new Set())}>
-                    Clear selection
                   </s-button>
                 ) : null}
               </s-stack>
@@ -335,9 +280,9 @@ export default function Links() {
 
               {shown.length === 0 ? (
                 <s-stack gap="small-100">
-                  <s-paragraph>{onlySelected ? "No products are selected." : "No products match these filters."}</s-paragraph>
+                  <s-paragraph>{onlySelected ? "No products are selected." : found.waiting > 0 ? "No products to show yet." : "No products match these filters."}</s-paragraph>
                   <div>
-                    {onlySelected ? <s-button onClick={() => setOnlySelected(false)}>Show all products</s-button> : <s-button onClick={() => setFilters(NO_FILTERS)}>Clear filters</s-button>}
+                    {onlySelected ? <s-button onClick={() => ui.setOnlySelected(false)}>Show all products</s-button> : <s-button onClick={ui.clearFilters}>Clear filters</s-button>}
                   </div>
                 </s-stack>
               ) : (

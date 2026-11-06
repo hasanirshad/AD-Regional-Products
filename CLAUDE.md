@@ -2,7 +2,7 @@
 
 Read this first in every session. It is the standing context for this repo. Keep it short and true:
 when a decision, rule or fact here changes, change this file in the same piece of work.
-Last reviewed: 2026-10-29 (blocks upgrade: 11 Product Insights blocks, settings v2; see "Blocks upgrade").
+Last reviewed: 2026-11-06 (one standard search and filter bar on every list; see "Search and filter bar (standard)").
 
 ## What this is
 
@@ -99,7 +99,8 @@ app/
     MoveReview.tsx               move review (inside RunFlow)
     FixReview.tsx                fixes: UnpublishFix (RunFlow) | CountriesFix (own recheck + read-back) | UnifyFix (-> MoveReview)
     PasswordGate.tsx             useGuard(): dialog + runUnlocked
-    FilterBar, SelectField, ScopeBanner, Gate, Loading, PageBody
+    filters/                     THE search and filter bar: SearchFilterBar, FilterPopup (s-modal), FilterChips, SelectionLine, useTypedSearch. See "Search and filter bar (standard)"
+    SelectField, ScopeBanner, Gate, Loading, PageBody
   lib/
     admin.ts                     GraphQL client: 30 s timeout, retry 429/THROTTLED, cost pause, write lock
     guard.ts                     password hash, runUnlocked, isMutation, assertUnlocked
@@ -118,7 +119,8 @@ app/
     check.ts                     buildProductCheck (pure)
     links.ts                     pickRoot (market domain), productUrl (preview_theme_id, stay_us), adminUrl, buildLinks, linksCsv (pure)
     fix.ts                       fix 1 plan, fix 2 (zones with rates only) + zoneDrift / zoneMissing / runCountryFix, fix 3 = a move
-    filter.ts, dom.ts, countries.ts, hidden.ts
+    filters/                     filterModel (state, defaults, chips), applyFilters (AND / any / all / none, waiting), searchText, selection (pure, tested)
+    dom.ts, countries.ts, hidden.ts
     editor/                      Product editor logic (pure + tested): model, edits, changes, apply, run, read, load, settings, create, bulk, bulkLoad, mf types/rules, fake Shopify,
                                  blockSettings (tabs, reset, diff, guarded save), blockPreview (preview of a block on sample data), locales (slots + adaptations)
 scripts/preload.mjs              modulepreload hints (ROUTE_IDS = views/layout, views/overview)
@@ -126,7 +128,7 @@ scripts/check-extensions.mjs     builds each Product Insights block (esbuild), 6
 extensions/                      Product Insights: 11 read-only admin blocks (Preact, own tsconfig). See "Product Insights blocks" and "Blocks upgrade" below
 public/_headers                  frame-ancestors for Shopify + immutable cache for /assets/*
 ```
-677 tests in 50 files (`app/lib/**/*.test.ts` and `extensions/**/*.test.*`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
+823 tests in 58 files (`app/lib/**/*.test.ts` and `extensions/**/*.test.*`): pure logic, admin client, guard, dom helpers, and `runPlan.test.ts`,
 which runs the real `applyMove` / `runPlan` against a fake Shopify (incl. a silent no-op). `testkit.ts` has the builders.
 No UI tests in the repo (the editor pages had a one-off Chromium smoke run, see `docs/PRODUCT-EDITOR.md`); no test for `shopify-data` queries (they only run inside the admin).
 
@@ -199,7 +201,7 @@ Zones (30 per location group) are flagged (`zonesTruncated`).
 ## Commands
 
 `npm test` (vitest), `npm run typecheck`, `npm run build`, `npm run deploy`. Before any handoff run
-test + typecheck + build. Expected: 677 tests pass, typecheck clean (`typecheck` now also checks `extensions/`). `npm run check:extensions` builds the eleven blocks and checks Shopify's 64 KB limit.
+test + typecheck + build. Expected: 823 tests pass, typecheck clean (`typecheck` now also checks `extensions/`). `npm run check:extensions` builds the eleven blocks and checks Shopify's 64 KB limit.
 
 ## Channels & catalogues page (added 2026-10-26)
 
@@ -223,16 +225,12 @@ test + typecheck + build. Expected: 677 tests pass, typecheck clean (`typecheck`
 - Product list (Step 1) shows, per product, read only: **Tracked** (all / none / n of N), **When sold out** (Stops at 0 / Keeps selling / n of N),
   and **Stock by location** (every location where a variant is stocked, available total, "(n of N variants)" when partial). Read for the products on
   the current page only (2 per call, first 40 variants, 8 locations: `readStockOverview`, `summarizeStock`), cached until "Refresh stock" or after a write.
-- **Filter panel** (`components/InventoryFilters.tsx`, logic in `lib/inventoryFilter.ts`, state `invFilters` in the layout): search box + "Filters (n)" button that
-  opens a panel above the table + one removable chip per value. Different boxes must ALL match (AND). Several values in one box: any of them by default; for Tag, Catalogue and
-  Stocked-at a "A product needs: any / all of the chosen" dropdown appears (vendor, type and status are always "any"). **Tag is a plain dropdown** (pick one, it
-  is added to the chosen tags; Hasan asked for it). Type-and-pick lists (with counts, "Browse all"): Vendor, Product type, Catalogue, Stocked at (location). Tick boxes:
-  Status, Availability, Tracked. Number of variants: at least / at most. Availability, Tracked and Stocked-at need the stock of each product: when one is on,
-  the stock of ALL products matching the other filters is read in the background (2 per call, list fills as it goes, "Select all matching" waits).
-  Products whose stock is not read yet are left out and counted (`applyStockFilters().waiting`). Other pages still use the old `FilterBar`.
+- **Filters:** the standard bar (see "Search and filter bar (standard)"). The Stock section (Availability, Tracked, Stocked at) needs the stock of each product: when one is on,
+  the stock of every product the other filters have not already rejected is read in the background (2 per call, list fills as it goes, "Select all matching" waits).
+  Products whose stock is not read yet are left out and counted ("n products are waiting for their stock"). Tag is a plain dropdown (Hasan asked for it).
 - Also per row: the product title links to the product in Shopify admin, and an **Availability** column (Available / Sold out / n of N sold out;
   sold out = tracked, stops at 0, nothing available at any location: `StockSummary.soldOut`).
-- **Speed** (quick filter changes froze the tab): `FilterBar` keeps typing in its own box and filters 250 ms after the last key (all pages);
+- **Speed** (quick filter changes froze the tab): the search box keeps typing in its own state and filters 250 ms after the last key (all pages, `useTypedSearch`);
   rows are a memoised `StockRow` with a stable toggle; 25 rows per page; the stock read for a page starts 400 ms after the filters rest
   and is cancelled if they change again.
 - Calls: `productVariantsBulkUpdate` (tracked + policy, one per product, 250 variants max per call) then `inventorySetQuantities`
@@ -249,7 +247,7 @@ test + typecheck + build. Expected: 677 tests pass, typecheck clean (`typecheck`
 
 ## Product check page (changed 2026-10-26)
 
-- `/check` opens with the same filter bar as the other pages (search, status, vendor, type, tag, catalogue; own state `checkUi`) and a product
+- `/check` opens with the standard search and filter bar (own state `checkUi`) and a product
   list (15 per page, "Check" button per row). One product at a time. Choosing one shows its details (same sections as before) with a
   "Back to the list" button; filters and page are kept. The product is still read fresh from Shopify when chosen.
 
@@ -369,3 +367,31 @@ query; Returns needs scope `read_legal_policies` (deploy + approve). 568 tests i
 Descriptions (Edit product, Create product, Bulk edit, all languages) are edited in `components/editor/RichTextEditor.tsx` (toolbar + HTML view).
 Bulk cells show a preview and an Edit button that opens the editor in a dialog. Opening never changes the stored HTML; unsupported content (iframes, style,
 script) is kept as it was. Details: `docs/PRODUCT-EDITOR.md` ("Description editor"). DOM code (`richDom.ts`) is tested in Chromium only; `richHtml.ts` has unit tests.
+
+## Search and filter bar (standard) (2026-11-06)
+
+One bar for every list, the same in the three APPSDAPPS apps (AD Regional Products, AD Metadata, AD Regional Discounts). Changes how lists are searched and filtered only; nothing it does writes.
+
+- **Look.** Above every list, in this order: the search box (placeholder "Search by title, handle, SKU or any column") with the **Filters** button next to it ("Filters (n)", one per chip),
+  lines under the box ("n products still loading", "n products are waiting for their stock"), the removable **chips** with "Clear all" (nothing shown when no filter is on),
+  the **selection line** (only when rows are ticked), then the table.
+- **Popup.** `s-modal`, closed on every load, the body is drawn only while open. Footer slots: primary "Apply filters", secondary "Clear all". The choices are a draft until Apply
+  (the typed search is kept). It closes through `commandFor` + `command="--hide"`, and the `hide` / `afterhide` events keep React state in line.
+- **Search.** All words must be found (any column), case-insensitive, over title, handle, product id, vendor, type, status, tags, catalogue names and, where the page gives them,
+  the text of the table's columns (Bulk edit: the columns already read). 250 ms after the last key; the typing stays in `useTypedSearch`.
+- **Selection line.** "n selected", "Show only selected" (the table shows only the ticked rows and ignores search and filters: "Showing the n selected products (filters are ignored)"),
+  "Clear selection". Ticks survive search, filters and paging. "Select all matching" ticks only the matching rows.
+- **Sections** (fixed order and labels, a page shows only the ones it has): Status, Vendor, Product type, Collection, Tag has (+ any/all), Tag does not have, Market catalogue (in / not in),
+  Published in market, Stock, Number of variants, Price, Translations, Metafield, This page only (titled with the page). Different sections AND; several values in one section any of them
+  (only "Tag, has" has any/all); "does not have" and "not in" mean none of the chosen.
+- **Files.** `components/filters/` (SearchFilterBar, FilterPopup, FilterChips, SelectionLine, useTypedSearch), `lib/filters/` (filterModel, applyFilters, searchText, selection),
+  `views/filter-state.ts` (`ListUi` per page, `useListFilters`, `useCollectionData`), tests `lib/filters/filters.test.ts`, `components/filters/render.test.tsx`, `lib/editor/bulk.test.ts`.
+  Filters and ticks live in the layout per page (`ui`, `channelsUi`, `linksUi`, `checkUi`, `inventoryUi`, `overviewUi`, `pickerUi`; Bulk edit in `bulk-state`), so moving between pages keeps them; a reload resets them.
+- **Pages.** Availability (`/products`), Channels, Product check, Storefront links, Inventory, Overview (Products tab), Product Edits (picker), Bulk edit (table and Variants mode).
+  Not converted: Block settings (fewer than ~10 rows), the review and result tables of the run flows, the Overview summary tables.
+- **Not offered here.** Price (no price in the product list), Translations "outdated" (Bulk edit has no digest; Product Edits has it per product only), Stock outside Inventory (the read exists only there).
+- **Background reads.** Stock (Inventory), the products of a chosen collection (shared by every page, read once, skipped when the filter changed again before it started),
+  translation and metafield values (Bulk edit, the products read so far). Rows that cannot be judged yet are not shown and are counted.
+- **Not yet checked on a real store:** the popup opening and closing (`commandFor` / `--show` / `--hide`, `hide` and `afterhide`, Escape and the close button), Apply and Clear all closing it,
+  chip removal (`remove` event), the `s-search-field` clearing when "Clear all" is used, the modal size and scroll with long lists inside the admin iframe, the any/all and tag dropdowns inside the modal,
+  collection reads on a big store. The bar was run in Chromium with plain elements instead of Polaris (typing delay, open, apply, clear, chips, selection line): events and state were checked, not the look.

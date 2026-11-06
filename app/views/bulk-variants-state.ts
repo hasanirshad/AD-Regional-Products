@@ -36,6 +36,9 @@ export type VariantBulkState = {
 
   /** Product ids chosen in step 1, in the order chosen. */
   selected: string[];
+  /** "Show only selected" in the product list of step 1 (search and filters are ignored). */
+  onlySelected: boolean;
+  setOnlySelected: (on: boolean) => void;
   select: (ids: string[]) => void;
   unselect: (ids: string[]) => void;
   clearSelection: () => void;
@@ -72,6 +75,7 @@ export function useVariantBulk(shared: EditorShared): VariantBulkState {
   const [mode, setMode] = useState<BulkMode>("products");
   const [step, setStep] = useState<VariantStep>("products");
   const [selected, setSelected] = useState<string[]>([]);
+  const [onlySelected, setOnlySelected] = useState(false);
   const [columns, setColumnsRaw] = useState<Column[]>([]);
   const [page, setPage] = useState(0);
   const [edits, setEdits] = useState<EditMap>({});
@@ -83,7 +87,10 @@ export function useVariantBulk(shared: EditorShared): VariantBulkState {
 
   const select = useCallback((ids: string[]) => setSelected((s) => [...s, ...ids.filter((id) => !s.includes(id))].slice(0, MAX_PRODUCTS)), []);
   const unselect = useCallback((ids: string[]) => setSelected((s) => s.filter((id) => !ids.includes(id))), []);
-  const clearSelection = useCallback(() => setSelected([]), []);
+  const clearSelection = useCallback(() => {
+    setSelected([]);
+    setOnlySelected(false);
+  }, []);
   const setColumns = useCallback((c: Column[]) => {
     setColumnsRaw(c);
     setPage(0);
@@ -240,7 +247,7 @@ export function useVariantBulk(shared: EditorShared): VariantBulkState {
   }, [hasEdits]);
 
   return useMemo(
-    () => ({ mode, setMode, step, setStep, selected, select, unselect, clearSelection, columns, setColumns, rows, truncated, page, setPage, progress, stop, textOf, blockerOf, errorOf, editedOf, loadedOf, setCell, edits, built, ctx, discard, discardAll, reread }),
-    [mode, step, selected, select, unselect, clearSelection, columns, setColumns, rows, truncated, page, progress, stop, textOf, blockerOf, errorOf, editedOf, loadedOf, setCell, edits, built, ctx, discard, discardAll, reread],
+    () => ({ mode, setMode, step, setStep, selected, onlySelected, setOnlySelected, select, unselect, clearSelection, columns, setColumns, rows, truncated, page, setPage, progress, stop, textOf, blockerOf, errorOf, editedOf, loadedOf, setCell, edits, built, ctx, discard, discardAll, reread }),
+    [mode, step, selected, onlySelected, select, unselect, clearSelection, columns, setColumns, rows, truncated, page, progress, stop, textOf, blockerOf, errorOf, editedOf, loadedOf, setCell, edits, built, ctx, discard, discardAll, reread],
   );
 }

@@ -3,17 +3,16 @@
 // nothing. Products load lazily the first time the Products page opens.
 
 import type { BlockSettings } from "../../extensions/shared/settings";
-import type { InvFilters } from "../lib/inventoryFilter";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { NO_FILTERS } from "../lib/filter";
 import { buildParts } from "../lib/parts";
 import { loadMembership, loadProductsPage, PRODUCT_QUERY } from "../lib/shopify-data";
-import type { Filters, Membership, Parts, ProductCatalog, ProductRow, ProfileSummary } from "../lib/types";
+import type { Membership, Parts, ProductCatalog, ProductRow, ProfileSummary } from "../lib/types";
 import type { AppState } from "./state";
 import type { EditorShared } from "./editor-state";
 import type { EditState } from "./edit-state";
 import type { BulkState } from "./bulk-state";
 import type { VariantBulkState } from "./bulk-variants-state";
+import { useListUi, type CollectionData, type ListUi } from "./filter-state";
 
 export type ProductScope = "active" | "all";
 
@@ -142,31 +141,9 @@ export function useProductsLoad(app: Pick<AppState, "profiles" | "hiddenCatalogI
   );
 }
 
-export type ProductsUi = {
-  filters: Filters;
-  setFilters: (f: Filters) => void;
-  selected: Set<string>;
-  setSelected: (update: (prev: Set<string>) => Set<string>) => void;
-  page: number;
-  setPage: (n: number) => void;
-};
-
-export function useProductsUi(): ProductsUi {
-  const [filters, setFiltersRaw] = useState<Filters>(NO_FILTERS);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [page, setPage] = useState(0);
-
-  // Any filter change goes back to page 1.
-  const setFilters = useCallback((f: Filters) => {
-    setFiltersRaw(f);
-    setPage(0);
-  }, []);
-
-  return useMemo(
-    () => ({ filters, setFilters, selected, setSelected, page, setPage }),
-    [filters, setFilters, selected, page],
-  );
-}
+/** The state of one list page: filters, ticked rows, "Show only selected", page. See `filter-state.ts`. */
+export type ProductsUi = ListUi;
+export const useProductsUi = useListUi;
 
 export type Shared = AppState & {
   editor: EditorShared;
@@ -179,7 +156,11 @@ export type Shared = AppState & {
   linksUi: ProductsUi;
   checkUi: ProductsUi;
   inventoryUi: ProductsUi;
-  invFilters: { value: InvFilters; set: (f: InvFilters) => void };
+  overviewUi: ProductsUi;
+  /** The product picker of Product Edits. */
+  pickerUi: ProductsUi;
+  /** Collections for the Collection filter, read once and shared by every page. */
+  collections: CollectionData;
   /** The block settings being edited and not saved yet. Kept here so moving to another page does not lose them. */
   blockDraft: { value: BlockSettings | null; set: (s: BlockSettings | null) => void };
 };

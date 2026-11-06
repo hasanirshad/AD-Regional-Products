@@ -1,28 +1,32 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { FilterBar } from "../components/FilterBar";
 import { Loading } from "../components/Loading";
 import { PageBody } from "../components/PageBody";
 import { FixReview } from "../components/FixReview";
 import { ScopeBanner } from "../components/ScopeBanner";
-import { SelectField } from "../components/SelectField";
+import { SearchFilterBar } from "../components/filters/SearchFilterBar";
 import { summarizeCodes } from "../lib/countries";
 import { affectedLines, type FixRequest } from "../lib/fix";
 import {
   buildOverview,
   countryMatrix,
+  focusFilters,
   focusOf,
-  matchFocus,
-  NO_FOCUS,
+  IN_A_PROFILE,
+  matchLinePage,
   type CellState,
   type Focus,
   type ProfileRow,
   type Issue,
   type ProductLine,
 } from "../lib/overview";
+import { clearAll, type PageSection, type SectionId } from "../lib/filters/filterModel";
+import type { ProductRow } from "../lib/types";
+import { useListFilters } from "./filter-state";
 import { useStartProducts } from "./products-state";
 import { useAppState } from "./state";
 
 const PAGE_SIZE = 40;
+const SECTIONS: SectionId[] = ["status", "vendor", "productType", "collection", "tag", "tagNot", "catalog", "variants", "page"];
 
 const CELL: Record<CellState, { label: string; tone: "success" | "warning" | "critical" | "neutral" }> = {
   sellable: { label: "Sells", tone: "success" },
@@ -165,14 +169,12 @@ function ProfileBadge({ g }: { g: ProfileRow }) {
 }
 
 export default function Overview() {
-  const { shop, markets, profiles, products, refresh } = useAppState();
+  const { shop, markets, profiles, products, overviewUi: ui, collections, refresh } = useAppState();
   useStartProducts(products);
 
   const [tab, setTab] = useState<"overview" | "products" | "fix">("overview");
   const [fixRequest, setFixRequest] = useState<FixRequest | null>(null);
-  const [focus, setFocus] = useState<Focus>(NO_FOCUS);
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(0);
+  const { filters, setFilters, page, setPage } = ui;
 
   const overview = useMemo(
     () =>
@@ -181,6 +183,42 @@ export default function Overview() {
         : null,
     [markets, profiles, products.status, products.rows, products.membership, products.parts, products.notes],
   );
+
+  // The product list of the Products tab: the standard bar. What only this page knows (problems, profile, market state) is in "This page only".
+  const lineById = useMemo(() => new Map((overview?.lines ?? []).map((l) => [l.product.id, l])), [overview]);
+  const pageSections = useMemo<PageSection[]>(() => {
+    const sell = overview?.markets.map((m) => m.market) ?? [];
+    return [
+      {
+        key: "show",
+        label: "Show",
+        single: true,
+        options: [
+          { value: "problem", label: "Cannot be bought somewhere" },
+          { value: "nocat", label: "In no catalogue" },
+          { value: "ok", label: "No problems" },
+          { value: "split", label: "Variants in different profiles" },
+        ],
+      },
+      { key: "profile", label: "Profile", single: true, options: [{ value: IN_A_PROFILE, label: "In a profile (not General)" }, ...(overview?.shippers ?? []).map((s) => ({ value: s.key, label: s.name }))] },
+      { key: "market", label: "Market", single: true, options: sell.map((m) => ({ value: m.id, label: m.name })) },
+      {
+        key: "state",
+        label: "In that market",
+        single: true,
+        options: [
+          { value: "published", label: "Published" },
+          { value: "sellable", label: "Sells" },
+          { value: "partial", label: "Partial" },
+          { value: "blocked", label: "Blocked" },
+          { value: "unpublished", label: "Not published" },
+        ],
+      },
+    ];
+  }, [overview]);
+  const context = useMemo(() => ({ pageMatch: (p: ProductRow, page: Record<string, string[]>) => { const l = lineById.get(p.id); return l ? matchLinePage(l, page) : true; } }), [lineById]);
+  const extra = useMemo(() => ({ pageSections }), [pageSections]);
+  const found = useListFilters({ rows: products.rows, ui, markets, collections, context, options: extra, sections: SECTIONS });
 
   const heading = `Overview · ${shop.name}`;
 
@@ -211,9 +249,7 @@ export default function Overview() {
   }
 
   const open: Open = (f) => {
-    setFocus(f);
-    setSearch("");
-    setPage(0);
+    setFilters({ ...clearAll(), ...focusFilters(f) });
     setTab("products");
     window.scrollTo?.({ top: 0 });
   };
@@ -237,7 +273,7 @@ export default function Overview() {
         Overview
       </s-button>
       <s-button variant={tab === "products" ? "primary" : "secondary"} onClick={() => setTab("products")}>
-        {`Products (${overview.lines.filter((l) => matchFocus(l, focus)).length})`}
+        {`Products (${found.matching.length})`}
       </s-button>
       {fixRequest ? (
         <s-button variant={tab === "fix" ? "primary" : "secondary"} onClick={() => setTab("fix")}>
@@ -294,36 +330,10 @@ export default function Overview() {
 
   // ---- Products tab ------------------------------------------------------
   if (tab === "products") {
-    const q = search.trim().toLowerCase();
-    const lines = overview.lines.filter((l) => {
-      if (!matchFocus(l, focus)) return false;
-      if (!q) return true;
-      const p = l.product;
-      return [p.title, p.handle, p.vendor, p.productType, ...p.tags].some((v) => v.toLowerCase().includes(q));
-    });
+    const lines = found.list.map((p) => lineById.get(p.id)).filter((l): l is ProductLine => l !== undefined);
     const pages = Math.max(1, Math.ceil(lines.length / PAGE_SIZE));
     const safePage = Math.min(page, pages - 1);
     const pageLines = lines.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
-    const set = (patch: Partial<Focus>) => {
-      setFocus({ ...focus, ...patch });
-      setPage(0);
-    };
-
-    const showLabel = { nocat: "In no catalogue", problem: "Cannot be bought somewhere", ok: "No problems", split: "Variants in different profiles" } as const;
-    const chips = [
-      ...(focus.activeOnly ? [{ key: "activeOnly", label: "Active only" }] : []),
-      ...(focus.show ? [{ key: "show", label: showLabel[focus.show] }] : []),
-      ...(focus.profileKey ? [{ key: "profileKey", label: `Profile: ${profileName(focus.profileKey)}` }] : []),
-      ...(focus.inProfile ? [{ key: "inProfile", label: "In a profile" }] : []),
-      ...(focus.marketId ? [{ key: "marketId", label: `Market: ${marketName(focus.marketId)}` }] : []),
-      ...(focus.state ? [{ key: "state", label: focus.state === "published" ? "Published" : CELL[focus.state].label }] : []),
-      ...(focus.catalogId ? [{ key: "catalogId", label: `Catalogue: ${catalogName(focus.catalogId)}` }] : []),
-    ];
-    const removeChip = (key: string) => {
-      const reset: Partial<Focus> = { [key]: NO_FOCUS[key as keyof Focus] };
-      if (key === "marketId") reset.state = "";
-      set(reset);
-    };
 
     return (
       <s-page heading={heading} inlineSize="large">
@@ -333,60 +343,7 @@ export default function Overview() {
           <ScopeBanner scope={products.scope} count={totals.products} onChange={products.setScope} />
             <s-section heading="Products">
               <s-stack gap="base">
-                <FilterBar
-                  search={search}
-                  onSearch={(v) => {
-                    setSearch(v);
-                    setPage(0);
-                  }}
-                  placeholder="Search by title, handle, vendor, type or tag"
-                  activeCount={chips.length}
-                  chips={chips}
-                  onRemoveChip={removeChip}
-                  onClear={() => {
-                    setFocus(NO_FOCUS);
-                    setSearch("");
-                    setPage(0);
-                  }}
-                >
-                  <SelectField
-                    label="Show"
-                    value={focus.show}
-                    onChange={(v) => set({ show: v as Focus["show"] })}
-                    options={[
-                      { value: "", label: "All products" },
-                      { value: "problem", label: "Cannot be bought somewhere" },
-                      { value: "nocat", label: "In no catalogue" },
-                      { value: "ok", label: "No problems" },
-                      { value: "split", label: "Variants in different profiles" },
-                    ]}
-                  />
-                  <SelectField
-                    label="Profile"
-                    value={focus.profileKey}
-                    onChange={(v) => set({ profileKey: v, inProfile: false })}
-                    options={[{ value: "", label: "Any" }, ...overview.shippers.map((s) => ({ value: s.key, label: s.name }))]}
-                  />
-                  <SelectField
-                    label="Market"
-                    value={focus.marketId}
-                    onChange={(v) => set({ marketId: v, state: v ? focus.state : "" })}
-                    options={[{ value: "", label: "Any" }, ...sellMarkets.map((m) => ({ value: m.id, label: m.name }))]}
-                  />
-                  <SelectField
-                    label="In that market"
-                    value={focus.state}
-                    onChange={(v) => set({ state: v as Focus["state"] })}
-                    options={[
-                      { value: "", label: "Any" },
-                      { value: "published", label: "Published" },
-                      { value: "sellable", label: "Sells" },
-                      { value: "partial", label: "Partial" },
-                      { value: "blocked", label: "Blocked" },
-                      { value: "unpublished", label: "Not published" },
-                    ]}
-                  />
-                </FilterBar>
+                <SearchFilterBar filters={filters} onChange={setFilters} sections={SECTIONS} options={found.options} pageTitle="Overview" notes={found.notes} onOpen={found.onOpen} />
                 <s-text color="subdued">{`${lines.length} of ${overview.lines.length} products`}</s-text>
                 {lines.length === 0 ? (
                   <s-paragraph>No products match.</s-paragraph>

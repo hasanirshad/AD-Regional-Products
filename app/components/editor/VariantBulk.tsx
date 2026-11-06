@@ -1,5 +1,7 @@
 import { memo, useMemo, useState } from "react";
 import { onChecked } from "../../lib/dom";
+import { onlySelectedStays, visibleRows } from "../../lib/filters/selection";
+import { SelectionLine } from "../filters/SelectionLine";
 import { columnsFor, variantMetaColumn, translatableVariantMetafield, VARIANT_FIELDS, MAX_PRODUCTS, type VariantRow } from "../../lib/editor/bulkVariants";
 import type { Column } from "../../lib/editor/bulk";
 import { STATUS_LABEL } from "../../lib/editor/model";
@@ -45,12 +47,13 @@ function Steps({ vb }: { vb: VariantBulkState }) {
 
 function ProductPicker({ vb, bulk, shared, products }: { vb: VariantBulkState; bulk: BulkState; shared: EditorShared; products: ProductsLoad }) {
   const [page, setPage] = useState(0);
-  const rows = bulk.rows;
+  const chosen = useMemo(() => new Set(vb.selected), [vb.selected]);
+  // "Show only selected": the ticked products, whatever the search and filters say.
+  const only = onlySelectedStays(chosen, vb.onlySelected);
+  const rows = useMemo(() => (only ? visibleRows(products.rows, bulk.rows, chosen, true) : bulk.rows), [only, products.rows, bulk.rows, chosen]);
   const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const at = Math.min(page, pages - 1);
   const pageRows = rows.slice(at * PAGE_SIZE, (at + 1) * PAGE_SIZE);
-  const chosen = new Set(vb.selected);
-  const visibleChosen = rows.filter((r) => chosen.has(r.id)).length;
   const needsAll = !bulk.all && bulk.inScope > QUICK;
 
   return (
@@ -59,6 +62,9 @@ function ProductPicker({ vb, bulk, shared, products }: { vb: VariantBulkState; b
         <s-stack gap="base">
           <s-text color="subdued">Filter the list, then tick the products whose variants you want to edit. Your ticks stay when you change the filters.</s-text>
           <BulkFilterPanel bulk={bulk} shared={shared} products={products} />
+          <SelectionLine count={vb.selected.length} onlySelected={only} onOnlySelected={(on) => { vb.setOnlySelected(on); setPage(0); }} onClear={() => { vb.clearSelection(); setPage(0); }}>
+            <s-text color="subdued">{`most ${MAX_PRODUCTS}`}</s-text>
+          </SelectionLine>
         </s-stack>
       </s-section>
 
@@ -75,7 +81,7 @@ function ProductPicker({ vb, bulk, shared, products }: { vb: VariantBulkState; b
         </s-section>
       ) : (
         <>
-          {needsAll ? (
+          {needsAll && !only ? (
             <s-banner tone="info" heading={`Showing the first ${QUICK} of ${bulk.inScope} products`}>
               <s-paragraph>The missing-translation and empty-metafield filters look only at the products read so far.</s-paragraph>
               <s-button slot="secondary-actions" onClick={bulk.loadAll}>
@@ -89,13 +95,11 @@ function ProductPicker({ vb, bulk, shared, products }: { vb: VariantBulkState; b
                 <s-button onClick={() => vb.select(pageRows.map((r) => r.id))} disabled={pageRows.length === 0 || undefined}>
                   Select this page
                 </s-button>
-                <s-button onClick={() => vb.select(rows.map((r) => r.id))} disabled={rows.length === 0 || undefined}>
-                  {rows.length > MAX_PRODUCTS ? `Select the first ${MAX_PRODUCTS} matching` : `Select all ${rows.length} matching`}
-                </s-button>
-                <s-button onClick={vb.clearSelection} disabled={vb.selected.length === 0 || undefined}>
-                  Clear selection
-                </s-button>
-                <s-text color="subdued">{`${vb.selected.length} selected${visibleChosen !== vb.selected.length ? ` (${visibleChosen} in this list)` : ""} · most ${MAX_PRODUCTS}`}</s-text>
+                {only ? null : (
+                  <s-button onClick={() => vb.select(rows.map((r) => r.id))} disabled={rows.length === 0 || undefined}>
+                    {rows.length > MAX_PRODUCTS ? `Select the first ${MAX_PRODUCTS} matching` : `Select all ${rows.length} matching`}
+                  </s-button>
+                )}
               </s-stack>
               {rows.length === 0 ? (
                 <s-text color="subdued">{bulk.progress.busy ? "Reading…" : "No products match the filters."}</s-text>

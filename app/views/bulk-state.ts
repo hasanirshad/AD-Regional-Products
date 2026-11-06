@@ -7,28 +7,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildChanges, type BuiltChanges, type ChangeContext } from "../lib/editor/changes";
 import {
-  NO_BULK_FILTERS,
-  applyListFilters,
-  applyValueFilters,
   cellText,
   filterColumns,
   listText,
+  metafieldEmptyOf,
   parseCell,
   productColumn,
   sortRows,
   targetOf,
-  type BulkFilters,
+  translationStateOf,
   type Column,
   type Sort,
 } from "../lib/editor/bulk";
-import { loadCells, loadCollectionProducts, loadCollections, newCache, type Cache, type CollectionChoice } from "../lib/editor/bulkLoad";
+import { loadCells, newCache, type Cache } from "../lib/editor/bulkLoad";
+import { applyListFilters, applyValueFilters, type FilterContext } from "../lib/filters/applyFilters";
+import { needsCollections, needsValues, NO_FILTERS, type FilterState } from "../lib/filters/filterModel";
+import { marketCatalogsOf, type CollectionData } from "./filter-state";
+import type { Market } from "../lib/types";
 import { editCount, effective, putEdit, removeEdits, type EditMap } from "../lib/editor/edits";
 import { liveGql, messageOf } from "../lib/editor/gql";
 import { defKey } from "../lib/editor/load";
 import { targetKey, type Target, type Value } from "../lib/editor/model";
 import type { ProductRow } from "../lib/types";
-import type { EditorShared, Lazy } from "./editor-state";
-import { useLazy } from "./editor-state";
+import type { EditorShared } from "./editor-state";
 import type { ProductsLoad } from "./products-state";
 
 /** Products read before "Load all". */
@@ -38,15 +39,15 @@ export const PAGE_SIZE = 25;
 export type BulkState = {
   columns: Column[];
   setColumns: (c: Column[]) => void;
-  filters: BulkFilters;
-  setFilters: (f: BulkFilters) => void;
+  filters: FilterState;
+  setFilters: (f: FilterState) => void;
   sort: Sort | null;
   setSort: (s: Sort | null) => void;
   page: number;
   setPage: (n: number) => void;
 
-  collections: Lazy<CollectionChoice[]>;
-  collectionError: string;
+  /** The products that match the search and the sections, but whose values (their columns) are not read yet: they cannot be searched by column. */
+  unreadForSearch: number;
 
   /** Rows after the filters and the sort: what the table pages through. */
   rows: ProductRow[];
@@ -82,9 +83,9 @@ export type BulkState = {
   ensureProducts: (ids: string[], cols: Column[]) => Promise<void>;
 };
 
-export function useBulkState(shared: EditorShared, products: ProductsLoad): BulkState {
+export function useBulkState(shared: EditorShared, products: ProductsLoad, collections: CollectionData, markets: Market[]): BulkState {
   const [columns, setColumns] = useState<Column[]>([productColumn("title"), productColumn("tags")]);
-  const [filters, setFiltersRaw] = useState<BulkFilters>(NO_BULK_FILTERS);
+  const [filters, setFiltersRaw] = useState<FilterState>(NO_FILTERS);
   const [sort, setSort] = useState<Sort | null>(null);
   const [page, setPage] = useState(0);
   const [all, setAll] = useState(false);
@@ -95,45 +96,49 @@ export function useBulkState(shared: EditorShared, products: ProductsLoad): Bulk
   const cache = useRef<Cache>(newCache());
   const bump = useCallback(() => setVersion((v) => v + 1), []);
 
-  const setFilters = useCallback((f: BulkFilters) => {
+  const setFilters = useCallback((f: FilterState) => {
     setFiltersRaw(f);
     setPage(0);
   }, []);
 
-  // ---- collections (read when the filter is first used)
-  const collections = useLazy(() => loadCollections(liveGql));
-  const [collectionIds, setCollectionIds] = useState<{ id: string; ids: Set<string> } | null>(null);
-  const [collectionError, setCollectionError] = useState("");
+  // The products of the chosen collections are read in the background (shared with the other pages).
+  const chosenCollections = filters.collection;
   useEffect(() => {
-    if (!filters.collection) {
-      setCollectionError("");
-      return;
-    }
-    if (collectionIds?.id === filters.collection) return;
-    let cancelled = false;
-    setCollectionError("");
-    loadCollectionProducts(liveGql, filters.collection)
-      .then((ids) => !cancelled && setCollectionIds({ id: filters.collection, ids }))
-      .catch((e) => !cancelled && setCollectionError(messageOf(e)));
-    return () => {
-      cancelled = true;
-    };
-  }, [filters.collection, collectionIds?.id]);
+    if (needsCollections(filters)) collections.want(chosenCollections);
+  }, [chosenCollections.join("|")]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- which rows, and which values they need
   const defs = shared.productDefs.data ?? [];
+  const slotKeys = useMemo(() => shared.slots.map((s) => s.key), [shared.slots]);
+  const marketCatalogs = useMemo(() => marketCatalogsOf(markets), [markets]);
   const needed = useMemo(() => {
     const byId = new Map<string, Column>();
-    for (const c of [...columns, ...filterColumns(filters, defs)]) byId.set(c.id, c);
+    for (const c of [...columns, ...filterColumns(filters, defs, slotKeys)]) byId.set(c.id, c);
     return [...byId.values()];
-  }, [columns, filters, defs]);
+  }, [columns, filters, defs, slotKeys]);
 
-  const listFiltered = useMemo(() => {
-    const ids = filters.collection && collectionIds?.id === filters.collection ? collectionIds.ids : null;
-    // While the collection is still being read nothing is shown, rather than every product.
-    if (filters.collection && !ids) return [];
-    return applyListFilters(products.rows, filters, ids);
-  }, [products.rows, filters, collectionIds]);
+  // The search covers what identifies a product plus the text of the table's columns for the products already read.
+  const searching = filters.search.trim() !== "";
+  const searchVersion = searching ? version : 0;
+  const searchColumns = useCallback(
+    (p: ProductRow): string[] => {
+      const out: string[] = [];
+      for (const c of columns) {
+        const t = targetOf(c, p.id, cache.current.variantIds.get(p.id) ?? null);
+        const v = t ? cache.current.values.get(targetKey(t)) : undefined;
+        if (v !== undefined && !(c.group === "Product" && listText(p, c.field ?? "") !== null)) out.push(cellText(c, v));
+      }
+      return out;
+    },
+    [columns, searchVersion], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const listContext = useMemo<FilterContext>(
+    () => ({ marketCatalogs, collections: collections.members, searchColumns: searching ? searchColumns : undefined }),
+    [marketCatalogs, collections.members, searching, searchColumns],
+  );
+  // While a chosen collection is still being read nothing is shown, rather than every product.
+  const listResult = useMemo(() => applyListFilters(products.rows, filters, listContext), [products.rows, filters, listContext]);
+  const listFiltered = listResult.rows;
 
   // Sorting by a column that comes with the list is free and decides which products are read first.
   const listSorted = useMemo(() => {
@@ -197,7 +202,18 @@ export function useBulkState(shared: EditorShared, products: ProductsLoad): Bulk
   // ---- values
   const valueAt = useCallback((t: Target): Value | undefined => cache.current.values.get(targetKey(t)), [version]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const valueFiltered = useMemo(() => applyValueFilters(subset, filters, defs, (id, t) => cache.current.values.get(targetKey(t))), [subset, filters, defs, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  const valueFiltered = useMemo(() => {
+    if (!needsValues(filters)) return { rows: subset, waiting: 0 };
+    const valueOf = (id: string, t: Target) => cache.current.values.get(targetKey(t));
+    const def = defs.find((d) => `${d.namespace}.${d.key}` === filters.metafield);
+    return applyValueFilters(subset, filters, { translation: (p, slot) => translationStateOf(p, slot, valueOf), metafieldEmpty: (p) => metafieldEmptyOf(p, def, valueOf) }, slotKeys);
+  }, [subset, filters, defs, slotKeys, version]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Products that the search could only judge by their identifying fields, because their columns are not read yet.
+  const unreadForSearch = useMemo(() => {
+    if (!searching || columns.every((c) => c.group === "Product" && listText({ title: "" } as ProductRow, c.field ?? "") !== null)) return 0;
+    return listFiltered.filter((r) => !cache.current.values.has(targetKey({ kind: "product", productId: r.id, field: "title" }))).length;
+  }, [searching, columns, listFiltered, version]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = useMemo(() => {
     const field = sort?.column;
@@ -321,11 +337,10 @@ export function useBulkState(shared: EditorShared, products: ProductsLoad): Bulk
       setSort,
       page,
       setPage,
-      collections,
-      collectionError,
+      unreadForSearch,
       rows,
       inScope: listFiltered.length,
-      waiting: valueFiltered.waiting,
+      waiting: valueFiltered.waiting + listResult.waiting,
       loadedCount,
       all,
       loadAll,
@@ -345,6 +360,6 @@ export function useBulkState(shared: EditorShared, products: ProductsLoad): Bulk
       reread,
       ensureProducts,
     }),
-    [columns, filters, setFilters, sort, page, collections, collectionError, rows, listFiltered.length, valueFiltered.waiting, loadedCount, all, loadAll, progress, stop, cellValue, textOf, noVariant, cellVariant, isLoaded, setCell, edits, built, ctx, discard, discardAll, reread, ensureProducts],
+    [columns, filters, setFilters, sort, page, unreadForSearch, rows, listFiltered.length, listResult.waiting, valueFiltered.waiting, loadedCount, all, loadAll, progress, stop, cellValue, textOf, noVariant, cellVariant, isLoaded, setCell, edits, built, ctx, discard, discardAll, reread, ensureProducts],
   );
 }

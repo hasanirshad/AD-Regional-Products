@@ -71,18 +71,6 @@ export type ProductRow = {
   variantCount: number;
 };
 
-export type Filters = {
-  search: string;
-  status: string;
-  vendor: string;
-  productType: string;
-  tag: string;
-  /** "" any, NONE, ANY, or a catalogue id. */
-  catalog: string;
-  /** "" any, NONE (General, no profile), or a shipping profile id. */
-  profile: string;
-};
-
 /** product id -> the shipping profile that holds most of its variants, for products in a profile other than General. */
 export type Membership = Record<string, string>;
 

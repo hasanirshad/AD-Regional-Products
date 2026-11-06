@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
-import { FilterBar } from "../components/FilterBar";
+import { SearchFilterBar } from "../components/filters/SearchFilterBar";
 import { Loading } from "../components/Loading";
 import { PageBody } from "../components/PageBody";
-import { SelectField } from "../components/SelectField";
 import { summarizeCodes } from "../lib/countries";
 import { buildProductCheck, type ProductCheck, type ProductDetail, type Result } from "../lib/check";
-import { activeChips, ANY, applyFilters, filterOptions, NO_FILTERS, NONE } from "../lib/filter";
+import type { SectionId } from "../lib/filters/filterModel";
 import { loadProductDetail } from "../lib/shopify-data";
-import type { Filters } from "../lib/types";
+import { useListFilters } from "./filter-state";
 import { useStartProducts } from "./products-state";
 import { useAppState } from "./state";
 
 const PAGE_SIZE = 15;
+const SECTIONS: SectionId[] = ["status", "vendor", "productType", "collection", "tag", "tagNot", "catalog", "market", "variants"];
 const STATUS_LABEL: Record<string, string> = { ACTIVE: "Active", DRAFT: "Draft", ARCHIVED: "Archived" };
 
 const RESULT: Record<Result, { tone: "success" | "warning" | "critical" | "neutral"; label: string }> = {
@@ -25,7 +25,7 @@ const RESULT: Record<Result, { tone: "success" | "warning" | "critical" | "neutr
 const yes = (v: boolean) => <s-badge tone={v ? "success" : "neutral"}>{v ? "Yes" : "No"}</s-badge>;
 
 export default function Check() {
-  const { shop, markets, profiles, hiddenCatalogIds, products, checkUi: ui } = useAppState();
+  const { shop, markets, profiles, hiddenCatalogIds, products, checkUi: ui, collections } = useAppState();
   useStartProducts(products);
   const [params, setParams] = useSearchParams();
   const productId = params.get("product") ?? "";
@@ -51,13 +51,11 @@ export default function Check() {
   }, [productId, nonce, hiddenCatalogIds]);
 
   const { filters, setFilters, page, setPage } = ui;
-  const options = useMemo(() => filterOptions(products.rows), [products.rows]);
-  const filtered = useMemo(() => applyFilters(products.rows, filters, {}), [products.rows, filters]);
+  const found = useListFilters({ rows: products.rows, ui, markets, collections, sections: SECTIONS });
+  const filtered = found.list;
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pages - 1);
   const pageRows = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
-  const chips = activeChips(filters, { catalogs: options.catalogs, profiles: [] });
-  const set = (patch: Partial<Filters>) => setFilters({ ...filters, ...patch });
 
   const check = useMemo(
     () =>
@@ -83,59 +81,15 @@ export default function Check() {
                 {products.status === "error" ? <s-banner tone="critical" heading="Could not load products">{products.error}</s-banner> : null}
                 {products.status === "ready" ? (
                   <>
-                    <FilterBar
-                      search={filters.search}
-                      onSearch={(search) => set({ search })}
-                      placeholder="Search by title, handle, vendor, type or tag"
-                      activeCount={chips.length}
-                      chips={chips}
-                      onRemoveChip={(key) => set({ [key]: "" } as Partial<Filters>)}
-                      onClear={() => setFilters(NO_FILTERS)}
-                    >
-                      <SelectField
-                        label="Status"
-                        value={filters.status}
-                        onChange={(status) => set({ status })}
-                        options={[{ value: "", label: "Any status" }, ...options.statuses.map((s) => ({ value: s, label: STATUS_LABEL[s] ?? s }))]}
-                      />
-                      <SelectField
-                        label="Vendor"
-                        value={filters.vendor}
-                        onChange={(vendor) => set({ vendor })}
-                        options={[{ value: "", label: "Any vendor" }, ...options.vendors.map((v) => ({ value: v, label: v }))]}
-                      />
-                      <SelectField
-                        label="Product type"
-                        value={filters.productType}
-                        onChange={(productType) => set({ productType })}
-                        options={[{ value: "", label: "Any type" }, ...options.types.map((t) => ({ value: t, label: t }))]}
-                      />
-                      <SelectField
-                        label="Tag"
-                        value={filters.tag}
-                        onChange={(tag) => set({ tag })}
-                        options={[{ value: "", label: "Any tag" }, ...options.tags.map((t) => ({ value: t, label: t }))]}
-                      />
-                      <SelectField
-                        label="Catalogue"
-                        value={filters.catalog}
-                        onChange={(catalog) => set({ catalog })}
-                        options={[
-                          { value: "", label: "Any" },
-                          { value: NONE, label: "Not in any catalogue" },
-                          { value: ANY, label: "In any catalogue" },
-                          ...options.catalogs.map((c) => ({ value: c.id, label: c.title })),
-                        ]}
-                      />
-                    </FilterBar>
+                    <SearchFilterBar filters={filters} onChange={setFilters} sections={SECTIONS} options={found.options} notes={found.notes} onOpen={found.onOpen} />
                     <s-text color="subdued">
                       {filtered.length} of {products.rows.length} products. Draft and archived products appear after you load all products on the Products page.
                     </s-text>
                     {filtered.length === 0 ? (
                       <s-stack gap="small-100">
-                        <s-paragraph>No products match these filters.</s-paragraph>
+                        <s-paragraph>{found.waiting > 0 ? "No products to show yet." : "No products match these filters."}</s-paragraph>
                         <div>
-                          <s-button onClick={() => setFilters(NO_FILTERS)}>Clear filters</s-button>
+                          <s-button onClick={ui.clearFilters}>Clear filters</s-button>
                         </div>
                       </s-stack>
                     ) : (

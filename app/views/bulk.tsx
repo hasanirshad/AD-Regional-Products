@@ -40,11 +40,6 @@ export default function BulkEdit() {
   const { columns } = bulk;
   const defs = shared.productDefs.data ?? [];
 
-  // The collections list is read once, for the Collection filter.
-  useEffect(() => {
-    bulk.collections.load();
-  }, [bulk.collections.load]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const rows = bulk.rows;
   const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const page = Math.min(bulk.page, pages - 1);

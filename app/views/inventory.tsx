@@ -1,14 +1,16 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { InventoryFilters, type InventoryFilterOptions } from "../components/InventoryFilters";
 import { InventoryReview } from "../components/InventoryReview";
 import { Loading } from "../components/Loading";
 import { PageBody } from "../components/PageBody";
+import { SearchFilterBar } from "../components/filters/SearchFilterBar";
+import { SelectionLine } from "../components/filters/SelectionLine";
 import { ScopeBanner } from "../components/ScopeBanner";
 import { onChecked, onInput } from "../lib/dom";
-import { filterOptions } from "../lib/filter";
-import { applyBaseFilters, applyStockFilters, countValues, NO_INV_FILTERS, stockNeeded } from "../lib/inventoryFilter";
+import { needsStock, type SectionId } from "../lib/filters/filterModel";
+import { matchingSelected, selectMatching } from "../lib/filters/selection";
 import { loadStockLocations, planStock, readStock, readStockOverview, settingsProblem, type StockLocation, type StockPlan, type StockSettings, type StockSummary } from "../lib/inventory";
 import type { ProductRow } from "../lib/types";
+import { useListFilters } from "./filter-state";
 import { useStartProducts } from "./products-state";
 import { useAppState } from "./state";
 
@@ -19,20 +21,16 @@ const READ_PAUSE_MS = 400;
 /** Reviewing reads every selected product once, so the number is capped. */
 const MAX_SELECTED = 500;
 const STATUS_LABEL: Record<string, string> = { ACTIVE: "Active", DRAFT: "Draft", ARCHIVED: "Archived" };
+const SECTIONS: SectionId[] = ["status", "vendor", "productType", "collection", "tag", "tagNot", "catalog", "market", "stock", "variants"];
 
 type Stage = "choose" | "reading" | "review";
 
 // Four steps: 1 choose products, 2 choose the stock settings, 3 review (nothing written), 4 apply.
 // Typical use: every variant tracked, quantity 1, and not available once sold out.
 export default function Inventory() {
-  const { shop, products, inventoryUi: ui, invFilters, refresh } = useAppState();
+  const { shop, markets, products, inventoryUi: ui, collections, refresh } = useAppState();
   useStartProducts(products);
-  const { selected, setSelected, page, setPage } = ui;
-  const filters = invFilters.value;
-  const setFilters = (f: typeof filters) => {
-    invFilters.set(f);
-    setPage(0);
-  };
+  const { filters, setFilters, selected, setSelected, page, setPage } = ui;
 
   const [locations, setLocations] = useState<StockLocation[] | null>(null);
   const [locationError, setLocationError] = useState("");
@@ -67,24 +65,13 @@ export default function Inventory() {
   const [overviewNonce, setOverviewNonce] = useState(0);
 
   const rows = products.rows;
-  const options = useMemo(() => filterOptions(rows), [rows]);
-  const counts = useMemo(() => countValues(rows), [rows]);
-  // Filters that need no stock first, then the ones that do (those only judge products whose stock has been read).
-  const base = useMemo(() => applyBaseFilters(rows, filters), [rows, filters]);
-  const needStock = stockNeeded(filters);
-  const stockApplied = useMemo(() => applyStockFilters(base, filters, overview), [base, filters, overview]);
-  const filtered = stockApplied.rows;
-  const panelOptions = useMemo<InventoryFilterOptions>(() => {
-    const pick = (values: string[], m: Map<string, number>) => values.map((v) => ({ value: v, label: v, count: m.get(v) }));
-    return {
-      status: options.statuses.map((s) => ({ value: s, label: STATUS_LABEL[s] ?? s })),
-      vendor: pick(options.vendors, counts.vendor),
-      productType: pick(options.types, counts.productType),
-      tag: pick(options.tags, counts.tag),
-      catalog: options.catalogs.map((c) => ({ value: c.id, label: c.title, count: counts.catalog.get(c.id) })),
-      locations: (locations ?? []).map((l) => ({ value: l.id, label: l.name })),
-    };
-  }, [options, counts, locations]);
+  const needStock = needsStock(filters);
+  // The stock filters only judge products whose stock has been read; the others wait and are counted.
+  const context = useMemo(() => ({ stock: overview }), [overview]);
+  const found = useListFilters({ rows, ui, markets, collections, context, sections: SECTIONS, waitingFor: "their stock", options: useMemo(() => ({ locations: (locations ?? []).map((l) => ({ value: l.id, label: l.name })) }), [locations]) });
+  const filtered = found.list;
+  const base = found.candidates;
+  const waiting = found.waiting;
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pages - 1);
@@ -244,25 +231,16 @@ export default function Inventory() {
 
           <s-section heading="Step 1 · Choose products">
             <s-stack gap="base">
-              <InventoryFilters
-                filters={filters}
-                onChange={setFilters}
-                options={panelOptions}
-                stock={{ needed: needStock, remaining: stockApplied.waiting, total: base.length }}
-                shown={filtered.length}
-                total={rows.length}
-              />
+              <SearchFilterBar filters={filters} onChange={setFilters} sections={SECTIONS} options={found.options} notes={found.notes} onOpen={found.onOpen} />
+              <SelectionLine count={selected.size} onlySelected={found.onlySelected} onOnlySelected={ui.setOnlySelected} onClear={ui.clearSelection}>
+                {tooMany ? <s-text tone="critical">{`most ${MAX_SELECTED}`}</s-text> : null}
+              </SelectionLine>
 
               <s-stack direction="inline" gap="base" alignItems="center">
-                <s-text color="subdued">{selected.size} selected</s-text>
-                {filtered.length > 0 && selected.size < filtered.length ? (
-                  <s-button variant="tertiary" disabled={stockApplied.waiting > 0 || undefined} onClick={() => setSelected(() => new Set(filtered.map((p) => p.id)))}>
-                    {`Select all ${filtered.length} matching`}
-                  </s-button>
-                ) : null}
-                {selected.size > 0 ? (
-                  <s-button variant="tertiary" onClick={() => setSelected(() => new Set())}>
-                    Clear selection
+                <s-text color="subdued">{`${filtered.length} of ${rows.length} products${needStock && waiting > 0 ? " (still reading stock)" : ""}`}</s-text>
+                {!found.onlySelected && found.matching.length > 0 && matchingSelected(selected, found.matching) < found.matching.length ? (
+                  <s-button variant="tertiary" disabled={waiting > 0 || undefined} onClick={() => setSelected((prev) => selectMatching(prev, found.matching))}>
+                    {`Select all ${found.matching.length} matching`}
                   </s-button>
                 ) : null}
                 <s-button variant="tertiary" onClick={products.reload}>
@@ -283,13 +261,13 @@ export default function Inventory() {
                 </s-banner>
               ) : null}
 
-              {filtered.length === 0 && stockApplied.waiting > 0 && !overviewError ? (
+              {filtered.length === 0 && waiting > 0 && !overviewError ? (
                 <Loading message="Reading the stock of the products to apply the stock filters…" />
               ) : filtered.length === 0 ? (
                 <s-stack gap="small-100">
                   <s-paragraph>No products match these filters.</s-paragraph>
                   <div>
-                    <s-button onClick={() => setFilters(NO_INV_FILTERS)}>Clear filters</s-button>
+                    <s-button onClick={ui.clearFilters}>Clear filters</s-button>
                   </div>
                 </s-stack>
               ) : (
